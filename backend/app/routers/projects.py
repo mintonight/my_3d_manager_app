@@ -1,4 +1,7 @@
-import io
+from collections.abc import Iterator
+from pathlib import Path
+import queue
+import threading
 import zipfile
 from urllib.parse import quote
 
@@ -26,6 +29,49 @@ from ..storage import get_blob_path
 
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+
+class _QueueWriter:
+    def __init__(self, chunks: queue.Queue[bytes | BaseException | None]) -> None:
+        self.chunks = chunks
+
+    def write(self, data: bytes) -> int:
+        if data:
+            self.chunks.put(bytes(data))
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+
+def _stream_zip(entries: list[tuple[str, Path]]) -> Iterator[bytes]:
+    chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=32)
+
+    def produce() -> None:
+        try:
+            with zipfile.ZipFile(_QueueWriter(chunks), "w", zipfile.ZIP_STORED) as zf:
+                for arcname, blob_path in entries:
+                    zf.write(blob_path, arcname=arcname)
+        except BaseException as exc:
+            chunks.put(exc)
+        finally:
+            chunks.put(None)
+
+    thread = threading.Thread(target=produce, daemon=True)
+    thread.start()
+
+    while True:
+        chunk = chunks.get()
+        if chunk is None:
+            break
+        if isinstance(chunk, BaseException):
+            raise chunk
+        yield chunk
+
+
+def _safe_zip_name(name: str) -> str:
+    cleaned = name.strip().replace("\\", "_").replace("/", "_")
+    return cleaned or "未命名项目"
 
 
 def _project_out(p: Project, role: str) -> ProjectOut:
@@ -56,6 +102,45 @@ def list_my_projects(
         .all()
     )
     return [_project_out(p, role) for p, role in rows]
+
+
+@router.get("/backup/all")
+def download_all_projects_backup(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    if not user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+
+    projects = db.query(Project).order_by(Project.created_at.asc(), Project.id.asc()).all()
+    entries: list[tuple[str, Path]] = []
+    used_names: dict[str, int] = {}
+    for project in projects:
+        base_name = _safe_zip_name(project.name)
+        used_names[base_name] = used_names.get(base_name, 0) + 1
+        project_dir = base_name if used_names[base_name] == 1 else f"{base_name}_{project.id}"
+
+        files = db.query(FileModel).filter(FileModel.project_id == project.id).all()
+        for file in files:
+            if not file.current_version_id:
+                continue
+            version = db.get(FileVersion, file.current_version_id)
+            if not version:
+                continue
+            try:
+                blob_path = get_blob_path(version.blob_hash)
+            except FileNotFoundError:
+                continue
+            entries.append((f"{project_dir}/{file.name}", blob_path))
+
+    encoded = quote("数据备份.zip")
+    return StreamingResponse(
+        _stream_zip(entries),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=data_backup.zip; filename*=UTF-8''{encoded}"
+        },
+    )
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
@@ -94,24 +179,22 @@ def download_project(
     p, _, _ = ctx
     files = db.query(FileModel).filter(FileModel.project_id == p.id).all()
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in files:
-            if not f.current_version_id:
-                continue
-            v = db.get(FileVersion, f.current_version_id)
-            if not v:
-                continue
-            try:
-                blob_path = get_blob_path(v.blob_hash)
-            except FileNotFoundError:
-                continue
-            zf.write(blob_path, arcname=f.name)
-    buf.seek(0)
+    entries: list[tuple[str, Path]] = []
+    for f in files:
+        if not f.current_version_id:
+            continue
+        v = db.get(FileVersion, f.current_version_id)
+        if not v:
+            continue
+        try:
+            blob_path = get_blob_path(v.blob_hash)
+        except FileNotFoundError:
+            continue
+        entries.append((f.name, blob_path))
 
     encoded = quote(f"{p.name}.zip")
     return StreamingResponse(
-        buf,
+        _stream_zip(entries),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename=project_{p.id}.zip; filename*=UTF-8''{encoded}"

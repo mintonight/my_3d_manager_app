@@ -36,6 +36,20 @@ function canEdit(role?: Role) {
   return role === 'owner' || role === 'editor';
 }
 
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 0);
+}
+
 export default function ProjectDetail() {
   const { pid } = useParams<{ pid: string }>();
   const pidNum = Number(pid);
@@ -47,6 +61,7 @@ export default function ProjectDetail() {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
+  const [projectDownloading, setProjectDownloading] = useState(false);
   const [fileQuery, setFileQuery] = useState('');
   const [previewing, setPreviewing] = useState<FileItem | null>(null);
   const [commentFile, setCommentFile] = useState<FileItem | null>(null);
@@ -125,12 +140,9 @@ export default function ProjectDetail() {
       const response = await fetch(`/api/projects/${pidNum}/files/${fid}/versions/${vid}/download`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!response.ok) throw new Error(`下载失败: ${response.status}`);
       const blob = await response.blob();
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = name;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      saveBlob(blob, name);
     } catch (error) {
       message.error(String(error));
     }
@@ -158,6 +170,7 @@ export default function ProjectDetail() {
 
   const downloadProject = async () => {
     if (!project) return;
+    setProjectDownloading(true);
     try {
       const token = getToken();
       const response = await fetch(`/api/projects/${pidNum}/download`, {
@@ -168,14 +181,12 @@ export default function ProjectDetail() {
         return;
       }
       const blob = await response.blob();
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `${project.name}.zip`;
-      link.click();
-      URL.revokeObjectURL(link.href);
+      saveBlob(blob, `${project.name}.zip`);
       message.success('项目已打包下载');
     } catch (error) {
       message.error(String(error));
+    } finally {
+      setProjectDownloading(false);
     }
   };
 
@@ -219,7 +230,12 @@ export default function ProjectDetail() {
             <span className="apple-stat__value">{allFiles.length}</span>
           </div>
           <Space wrap>
-            <Button className="apple-pill-button apple-outline-button" onClick={() => void downloadProject()} disabled={allFiles.length === 0}>
+            <Button
+              className="apple-pill-button apple-outline-button"
+              onClick={() => void downloadProject()}
+              disabled={allFiles.length === 0}
+              loading={projectDownloading}
+            >
               下载项目
             </Button>
             {isOwner && (

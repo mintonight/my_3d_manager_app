@@ -46,16 +46,18 @@ def _mentioned_users(
     project_id: int,
     content: str,
     author_id: int,
+    mentioned_user_ids: list[int] | None = None,
 ) -> list[User]:
     usernames = {match.group(1) for match in MENTION_PATTERN.finditer(content)}
-    if not usernames:
+    user_ids = set(mentioned_user_ids or [])
+    if not usernames and not user_ids:
         return []
 
     rows = (
         db.query(User)
         .join(ProjectMember, ProjectMember.user_id == User.id)
         .filter(ProjectMember.project_id == project_id)
-        .filter(User.username.in_(usernames))
+        .filter((User.username.in_(usernames)) | (User.id.in_(user_ids)))
         .all()
     )
     return [user for user in rows if user.id != author_id]
@@ -68,6 +70,7 @@ def _create_comment(
     file: FileModel,
     content: str,
     file_version_id: int | None = None,
+    mentioned_user_ids: list[int] | None = None,
 ) -> Comment:
     comment = Comment(
         project_id=project.id,
@@ -79,7 +82,13 @@ def _create_comment(
     db.add(comment)
     db.flush()
 
-    for mentioned_user in _mentioned_users(db, project.id, comment.content, author.id):
+    for mentioned_user in _mentioned_users(
+        db,
+        project.id,
+        comment.content,
+        author.id,
+        mentioned_user_ids,
+    ):
         db.add(CommentMention(comment_id=comment.id, mentioned_user_id=mentioned_user.id))
         db.add(
             Notification(
@@ -137,7 +146,7 @@ def create_file_comment(
 ) -> CommentOut:
     project, user, _ = ctx
     file = _get_file_or_404(project.id, fid, db)
-    comment = _create_comment(db, project, user, file, data.content)
+    comment = _create_comment(db, project, user, file, data.content, mentioned_user_ids=data.mentioned_user_ids)
     return _comment_out(comment, user)
 
 
@@ -169,7 +178,15 @@ def create_version_comment(
     project, user, _ = ctx
     file = _get_file_or_404(project.id, fid, db)
     _get_version_or_404(fid, vid, db)
-    comment = _create_comment(db, project, user, file, data.content, file_version_id=vid)
+    comment = _create_comment(
+        db,
+        project,
+        user,
+        file,
+        data.content,
+        file_version_id=vid,
+        mentioned_user_ids=data.mentioned_user_ids,
+    )
     return _comment_out(comment, user)
 
 

@@ -117,6 +117,7 @@ class SearchResultOut(BaseModel):
 
 class CommentCreate(BaseModel):
     content: str = Field(min_length=1, max_length=2000)
+    mentioned_user_ids: list[int] = Field(default_factory=list)
 
 
 class CommentOut(BaseModel):

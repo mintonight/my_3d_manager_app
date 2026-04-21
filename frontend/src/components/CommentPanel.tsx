@@ -7,12 +7,13 @@ import {
   Input,
   List,
   Popconfirm,
+  Select,
   Space,
   Typography,
   message,
 } from 'antd';
 import { api, extractError } from '../api';
-import type { Comment, User } from '../types';
+import type { Comment, Member, User } from '../types';
 
 interface CommentPanelProps {
   pid: number;
@@ -55,10 +56,11 @@ export default function CommentPanel({
   onNotificationRead,
 }: CommentPanelProps) {
   const [comments, setComments] = useState<Comment[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [readNotificationId, setReadNotificationId] = useState<number | null>(null);
-  const [form] = Form.useForm<{ content: string }>();
+  const [form] = Form.useForm<{ content: string; mentioned_user_ids?: number[] }>();
 
   const endpoint = versionId
     ? `/projects/${pid}/files/${fid}/versions/${versionId}/comments`
@@ -67,8 +69,12 @@ export default function CommentPanel({
   const load = async () => {
     setLoading(true);
     try {
-      const response = await api.get<Comment[]>(endpoint);
-      setComments(response.data);
+      const [commentResponse, memberResponse] = await Promise.all([
+        api.get<Comment[]>(endpoint),
+        api.get<Member[]>(`/projects/${pid}/members`),
+      ]);
+      setComments(commentResponse.data);
+      setMembers(memberResponse.data);
     } catch (error) {
       message.error(extractError(error));
     } finally {
@@ -105,7 +111,7 @@ export default function CommentPanel({
     return () => window.clearTimeout(timer);
   }, [open, comments, highlightCommentId]);
 
-  const submit = async (values: { content: string }) => {
+  const submit = async (values: { content: string; mentioned_user_ids?: number[] }) => {
     setSubmitting(true);
     try {
       await api.post(endpoint, values);
@@ -145,10 +151,18 @@ export default function CommentPanel({
           label="发表评论"
           rules={[{ required: true, message: '请输入评论内容' }]}
         >
-          <Input.TextArea
-            rows={4}
-            maxLength={2000}
-            placeholder="支持 @用户名 提醒当前项目成员"
+          <Input.TextArea rows={4} maxLength={2000} placeholder="输入评论内容" />
+        </Form.Item>
+        <Form.Item name="mentioned_user_ids" label="@提醒成员">
+          <Select
+            mode="multiple"
+            allowClear
+            placeholder="选择当前项目成员，可单选或多选"
+            optionFilterProp="label"
+            options={members.map((member) => ({
+              value: member.user_id,
+              label: member.username,
+            }))}
           />
         </Form.Item>
         <Button className="apple-pill-button" type="primary" htmlType="submit" loading={submitting}>

@@ -13,7 +13,7 @@ import {
   message,
 } from 'antd';
 import { Link } from 'react-router-dom';
-import { api, extractError } from '../api';
+import { api, extractError, getToken } from '../api';
 import { useAuth } from '../auth';
 import type { Project } from '../types';
 
@@ -29,10 +29,25 @@ const ROLE_LABEL: Record<string, string> = {
   viewer: '查看者',
 };
 
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    link.remove();
+  }, 0);
+}
+
 export default function Projects() {
   const { user } = useAuth();
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [backupLoading, setBackupLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
 
@@ -64,6 +79,22 @@ export default function Projects() {
     }
   };
 
+  const downloadBackup = async () => {
+    setBackupLoading(true);
+    try {
+      const response = await fetch('/api/projects/backup/all', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!response.ok) throw new Error(`备份失败: ${response.status}`);
+      saveBlob(await response.blob(), '数据备份.zip');
+      message.success('数据备份已开始下载');
+    } catch (error) {
+      message.error(String(error));
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
   return (
     <div className="apple-page">
       <section className="apple-hero">
@@ -81,9 +112,20 @@ export default function Projects() {
             <span className="apple-stat__label">Projects</span>
             <span className="apple-stat__value">{items.length}</span>
           </div>
-          <Button className="apple-pill-button" type="primary" onClick={() => setOpen(true)}>
-            新建项目
-          </Button>
+          <Space wrap>
+            {user?.is_admin && (
+              <Button
+                className="apple-pill-button apple-outline-button"
+                onClick={() => void downloadBackup()}
+                loading={backupLoading}
+              >
+                数据备份
+              </Button>
+            )}
+            <Button className="apple-pill-button" type="primary" onClick={() => setOpen(true)}>
+              新建项目
+            </Button>
+          </Space>
         </div>
       </section>
 
