@@ -13,6 +13,7 @@ import {
   message,
 } from 'antd';
 import { api, extractError } from '../api';
+import { useI18n } from '../i18n';
 import type { Comment, Member, User } from '../types';
 
 interface CommentPanelProps {
@@ -34,7 +35,7 @@ function renderContent(content: string) {
   const parts = content.split(HIGHLIGHT_PATTERN);
   return parts.map((part, index) =>
     part.startsWith('@') ? (
-      <Typography.Text key={`${part}-${index}`} style={{ color: '#0071e3' }}>
+      <Typography.Text key={`${part}-${index}`} style={{ color: 'var(--ln-link-mention)' }}>
         {part}
       </Typography.Text>
     ) : (
@@ -55,12 +56,43 @@ export default function CommentPanel({
   notificationId,
   onNotificationRead,
 }: CommentPanelProps) {
+  const { isZh, formatDateTime } = useI18n();
   const [comments, setComments] = useState<Comment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [readNotificationId, setReadNotificationId] = useState<number | null>(null);
   const [form] = Form.useForm<{ content: string; mentioned_user_ids?: number[] }>();
+
+  const text = isZh
+    ? {
+        published: '评论已发布',
+        removed: '评论已删除',
+        publishComment: '发表评论',
+        contentRequired: '请输入评论内容',
+        contentPlaceholder: '输入评论内容',
+        mentions: '@提醒成员',
+        mentionsPlaceholder: '选择当前项目成员，可单选或多选',
+        submit: '发布评论',
+        empty: '还没有评论',
+        deleteConfirm: '删除这条评论？',
+        delete: '删除',
+        cancel: '取消',
+      }
+    : {
+        published: 'Comment posted',
+        removed: 'Comment deleted',
+        publishComment: 'Post Comment',
+        contentRequired: 'Please enter a comment',
+        contentPlaceholder: 'Enter your comment',
+        mentions: '@Mention members',
+        mentionsPlaceholder: 'Choose current project members',
+        submit: 'Post Comment',
+        empty: 'No comments yet',
+        deleteConfirm: 'Delete this comment?',
+        delete: 'Delete',
+        cancel: 'Cancel',
+      };
 
   const endpoint = versionId
     ? `/projects/${pid}/files/${fid}/versions/${versionId}/comments`
@@ -117,7 +149,7 @@ export default function CommentPanel({
       await api.post(endpoint, values);
       form.resetFields();
       await load();
-      message.success('评论已发布');
+      message.success(text.published);
     } catch (error) {
       message.error(extractError(error));
     } finally {
@@ -129,7 +161,7 @@ export default function CommentPanel({
     try {
       await api.delete(`/projects/${pid}/comments/${commentId}`);
       setComments((current) => current.filter((comment) => comment.id !== commentId));
-      message.success('评论已删除');
+      message.success(text.removed);
     } catch (error) {
       message.error(extractError(error));
     }
@@ -148,16 +180,16 @@ export default function CommentPanel({
       <Form form={form} layout="vertical" onFinish={submit}>
         <Form.Item
           name="content"
-          label="发表评论"
-          rules={[{ required: true, message: '请输入评论内容' }]}
+          label={text.publishComment}
+          rules={[{ required: true, message: text.contentRequired }]}
         >
-          <Input.TextArea rows={4} maxLength={2000} placeholder="输入评论内容" />
+          <Input.TextArea rows={4} maxLength={2000} placeholder={text.contentPlaceholder} />
         </Form.Item>
-        <Form.Item name="mentioned_user_ids" label="@提醒成员">
+        <Form.Item name="mentioned_user_ids" label={text.mentions}>
           <Select
             mode="multiple"
             allowClear
-            placeholder="选择当前项目成员，可单选或多选"
+            placeholder={text.mentionsPlaceholder}
             optionFilterProp="label"
             options={members.map((member) => ({
               value: member.user_id,
@@ -166,14 +198,14 @@ export default function CommentPanel({
           />
         </Form.Item>
         <Button className="apple-pill-button" type="primary" htmlType="submit" loading={submitting}>
-          发布评论
+          {text.submit}
         </Button>
       </Form>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <List
           loading={loading}
-          locale={{ emptyText: <Empty className="apple-empty" description="还没有评论" /> }}
+          locale={{ emptyText: <Empty className="apple-empty" description={text.empty} /> }}
           dataSource={comments}
           renderItem={(comment) => {
             const canDelete = currentUser?.is_admin || currentUser?.id === comment.author_id;
@@ -190,14 +222,14 @@ export default function CommentPanel({
                     ? [
                         <Popconfirm
                           key="delete"
-                          title="删除这条评论？"
+                          title={text.deleteConfirm}
                           onConfirm={() => void removeComment(comment.id)}
-                          okText="删除"
+                          okText={text.delete}
                           okButtonProps={{ danger: true }}
-                          cancelText="取消"
+                          cancelText={text.cancel}
                         >
                           <Button type="link" danger size="small">
-                            删除
+                            {text.delete}
                           </Button>
                         </Popconfirm>,
                       ]
@@ -208,7 +240,7 @@ export default function CommentPanel({
                   <Space wrap>
                     <Typography.Text strong>{comment.author_username}</Typography.Text>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      {new Date(comment.created_at).toLocaleString('zh-CN')}
+                      {formatDateTime(comment.created_at)}
                     </Typography.Text>
                   </Space>
                   <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>

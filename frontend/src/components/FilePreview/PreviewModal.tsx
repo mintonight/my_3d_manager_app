@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Button, Modal, Spin, Tag, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { getToken } from '../../api';
+import { useI18n } from '../../i18n';
 import FilePreview, { SolidWorksPreviewLauncher } from './index';
 import { getPreviewKind, prettyBytes } from './utils';
 
@@ -24,12 +25,24 @@ export default function PreviewModal({
   filename,
   versionNo,
 }: Props) {
+  const { isZh } = useI18n();
   const [blob, setBlob] = useState<Blob | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const kind = getPreviewKind(filename);
   const needsBlob = kind !== 'solidworks';
+  const text = isZh
+    ? {
+        downloadCurrentVersion: '下载此版本',
+        loadingFile: '正在加载文件...',
+        unableToLoadFile: '无法加载文件',
+      }
+    : {
+        downloadCurrentVersion: 'Download This Version',
+        loadingFile: 'Loading file...',
+        unableToLoadFile: 'Unable to Load File',
+      };
 
   useEffect(() => {
     if (!open || !vid) {
@@ -122,7 +135,7 @@ export default function PreviewModal({
           onClick={triggerDownload}
           disabled={needsBlob && !blob}
         >
-          下载此版本
+          {text.downloadCurrentVersion}
         </Button>
       }
       destroyOnClose
@@ -130,14 +143,14 @@ export default function PreviewModal({
       <div className="apple-preview-stage">
         {needsBlob && loading && (
           <div style={{ padding: 80, textAlign: 'center' }}>
-            <Spin tip="正在加载文件..." size="large" />
+            <Spin tip={text.loadingFile} size="large" />
           </div>
         )}
         {error && (
           <Alert
             type="error"
             showIcon
-            message="无法加载文件"
+            message={text.unableToLoadFile}
             description={error}
             style={{ margin: 24 }}
           />

@@ -21,12 +21,23 @@ def _migrate_users_table() -> None:
     if "users" not in inspector.get_table_names():
         return
     column_names = {column["name"] for column in inspector.get_columns("users")}
-    if "is_admin" in column_names:
-        return
     with engine.begin() as conn:
-        conn.execute(
-            text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
-        )
+        if "is_admin" not in column_names:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+            )
+        if "ui_language" not in column_names:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN ui_language VARCHAR(16) NOT NULL DEFAULT 'zh-CN'")
+            )
+        if "ui_theme" not in column_names:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN ui_theme VARCHAR(16) NOT NULL DEFAULT 'light'")
+            )
+        if "edrawings_exe_path" not in column_names:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN edrawings_exe_path VARCHAR(512)")
+            )
 
 
 def init_db() -> None:

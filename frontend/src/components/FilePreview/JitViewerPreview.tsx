@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Spin } from 'antd';
 import { createViewer, type FileType, type ViewerInstance } from 'jit-viewer';
 import 'jit-viewer/style.css';
+import { useAuth } from '../../auth';
+import { useI18n } from '../../i18n';
 import type { PreviewProps } from './index';
 import { getExt } from './utils';
 
@@ -82,6 +84,8 @@ const EXT_TO_MIME: Record<string, string> = {
 };
 
 export default function JitViewerPreview({ blob, filename }: PreviewProps) {
+  const { user } = useAuth();
+  const { language, isZh } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +97,16 @@ export default function JitViewerPreview({ blob, filename }: PreviewProps) {
     const wrapped = new File([normalizedBlob], filename, { type: mime });
     return { file: wrapped, fileType: EXT_TO_JIT_TYPE[ext] };
   }, [blob, filename]);
+
+  const text = isZh
+    ? {
+        loadingViewer: '加载预览器...',
+        previewFailed: '预览失败',
+      }
+    : {
+        loadingViewer: 'Loading viewer...',
+        previewFailed: 'Preview failed',
+      };
 
   useEffect(() => {
     let viewer: ViewerInstance | null = null;
@@ -108,9 +122,9 @@ export default function JitViewerPreview({ blob, filename }: PreviewProps) {
           file,
           filename,
           type: fileType,
-          theme: 'light',
+          theme: user?.ui_theme === 'dark' ? 'dark' : 'light',
           toolbar: true,
-          locale: 'zh-CN',
+          locale: language === 'zh-CN' ? 'zh-CN' : 'en',
           width: '100%',
           height: '100%',
           onReady: () => {
@@ -150,10 +164,17 @@ export default function JitViewerPreview({ blob, filename }: PreviewProps) {
       }
       viewer = null;
     };
-  }, [file, fileType, filename]);
+  }, [file, fileType, filename, language, user?.ui_theme]);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '75vh', background: '#fff' }}>
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '75vh',
+        background: 'var(--ln-preview-surface)',
+      }}
+    >
       {loading && !error && (
         <div
           style={{
@@ -164,17 +185,17 @@ export default function JitViewerPreview({ blob, filename }: PreviewProps) {
             justifyContent: 'center',
             zIndex: 1,
             pointerEvents: 'none',
-            background: 'rgba(255,255,255,0.7)',
+            background: 'var(--ln-preview-overlay)',
           }}
         >
-          <Spin tip="加载预览器..." size="large" />
+          <Spin tip={text.loadingViewer} size="large" />
         </div>
       )}
       {error && (
         <Alert
           type="error"
           showIcon
-          message="预览失败"
+          message={text.previewFailed}
           description={error}
           style={{ margin: 16 }}
         />

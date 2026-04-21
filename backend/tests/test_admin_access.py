@@ -36,6 +36,9 @@ def test_startup_creates_default_superadmin(client: TestClient) -> None:
         "username": "superadmin",
         "email": "superadmin@example.com",
         "is_admin": True,
+        "ui_language": "zh-CN",
+        "ui_theme": "light",
+        "edrawings_exe_path": None,
         "created_at": response.json()["created_at"],
     }
 
@@ -81,3 +84,28 @@ def test_superadmin_can_access_and_modify_other_users_projects_and_files(
 
     delete_project = client.delete(f"/api/projects/{project_id}", headers=admin_headers)
     assert delete_project.status_code == 204, delete_project.text
+
+
+def test_user_can_update_persistent_ui_settings(client: TestClient) -> None:
+    user_headers = _register_and_login(client, "alice", "alice@example.com")
+
+    response = client.patch(
+        "/api/auth/me/settings",
+        json={
+            "ui_language": "en-US",
+            "ui_theme": "dark",
+            "edrawings_exe_path": r"D:\Apps\eDrawings\eDrawings.exe",
+        },
+        headers=user_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["ui_language"] == "en-US"
+    assert response.json()["ui_theme"] == "dark"
+    assert response.json()["edrawings_exe_path"] == r"D:\Apps\eDrawings\eDrawings.exe"
+
+    me = client.get("/api/auth/me", headers=user_headers)
+    assert me.status_code == 200, me.text
+    assert me.json()["ui_language"] == "en-US"
+    assert me.json()["ui_theme"] == "dark"
+    assert me.json()["edrawings_exe_path"] == r"D:\Apps\eDrawings\eDrawings.exe"

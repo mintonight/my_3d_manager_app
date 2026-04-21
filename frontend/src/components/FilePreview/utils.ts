@@ -1,6 +1,6 @@
 export type PreviewKind = 'jit' | 'step' | 'solidworks' | 'unsupported';
 
-// SolidWorks / OLE-based CAD files we extract embedded PNG thumbnails for.
+// SolidWorks / OLE-based CAD files use external viewer launch actions.
 const SOLIDWORKS_EXTENSIONS = new Set(['sldprt', 'sldasm', 'slddrw']);
 
 // Everything jit-viewer handles natively — office docs, 2D CAD (DXF), common 3D

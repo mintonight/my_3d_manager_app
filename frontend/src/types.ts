@@ -1,11 +1,22 @@
 export type Role = 'owner' | 'editor' | 'viewer';
+export type UiLanguage = 'zh-CN' | 'en-US';
+export type UiTheme = 'light' | 'dark';
 
 export interface User {
   id: number;
   username: string;
   email: string;
   is_admin: boolean;
+  ui_language: UiLanguage;
+  ui_theme: UiTheme;
+  edrawings_exe_path: string | null;
   created_at: string;
+}
+
+export interface UserSettingsUpdate {
+  ui_language?: UiLanguage;
+  ui_theme?: UiTheme;
+  edrawings_exe_path?: string | null;
 }
 
 export interface Project {
@@ -82,9 +93,9 @@ export interface Comment {
 export interface Notification {
   id: number;
   user_id: number;
-  comment_id: number;
+  comment_id: number | null;
   project_id: number;
-  file_id: number;
+  file_id: number | null;
   file_version_id: number | null;
   type: string;
   is_read: boolean;

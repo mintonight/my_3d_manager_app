@@ -21,6 +21,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ui_language: Mapped[str] = mapped_column(String(16), default="zh-CN", nullable=False)
+    ui_theme: Mapped[str] = mapped_column(String(16), default="light", nullable=False)
+    edrawings_exe_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -123,5 +126,24 @@ class Notification(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id"), index=True)
     type: Mapped[str] = mapped_column(String(32), default="mention")
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DownloadNotification(Base):
+    __tablename__ = "download_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    file_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True, index=True)
+    file_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("file_versions.id"),
+        nullable=True,
+        index=True,
+    )
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    type: Mapped[str] = mapped_column(String(32), default="project_download")
+    message: Mapped[str] = mapped_column(String(512))
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

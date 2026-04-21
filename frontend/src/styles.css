@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --ln-bg: #ffffff;
   --ln-bg-deep: #f3f4f5;
   --ln-panel: #f7f8f8;
@@ -37,12 +38,59 @@
     rgba(0, 0, 0, 0.08) 0px 4px 12px,
     rgba(0, 0, 0, 0.1) 0px 12px 32px;
   --ln-overlay: rgba(15, 16, 17, 0.45);
+  --ln-header-bg: rgba(255, 255, 255, 0.85);
+  --ln-preview-surface: #ffffff;
+  --ln-preview-overlay: rgba(255, 255, 255, 0.7);
+  --ln-preview-note: #6e6e73;
+  --ln-preview-chip: rgba(0, 0, 0, 0.5);
+  --ln-link-mention: #0071e3;
   --ln-font-sans:
     "Inter Variable", "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont,
     "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Open Sans", "Helvetica Neue",
     helvetica, Arial, sans-serif;
   --ln-font-mono:
     "Berkeley Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ln-bg: #0d1117;
+  --ln-bg-deep: #0f141b;
+  --ln-panel: #121922;
+  --ln-surface: #141a22;
+  --ln-surface-2: #171f29;
+  --ln-text: #edf2f7;
+  --ln-text-secondary: #c6d0dd;
+  --ln-text-tertiary: #97a3b6;
+  --ln-text-quaternary: #738096;
+  --ln-brand: #8ea2ff;
+  --ln-accent: #9dacff;
+  --ln-accent-hover: #bbc6ff;
+  --ln-success: #34d399;
+  --ln-emerald: #34d399;
+  --ln-border-solid: #2e3948;
+  --ln-border-solid-2: #3a4659;
+  --ln-border-subtle: rgba(255, 255, 255, 0.06);
+  --ln-border-standard: rgba(255, 255, 255, 0.1);
+  --ln-surface-01: rgba(255, 255, 255, 0.02);
+  --ln-surface-04: rgba(255, 255, 255, 0.05);
+  --ln-surface-05: rgba(255, 255, 255, 0.07);
+  --ln-line-tint: #222d3a;
+  --ln-shadow-subtle: rgba(0, 0, 0, 0.24) 0px 1.2px 0px 0px;
+  --ln-shadow-ring: rgba(0, 0, 0, 0.35) 0px 0px 0px 1px;
+  --ln-shadow-elevated: rgba(0, 0, 0, 0.45) 0px 8px 24px;
+  --ln-shadow-dialog:
+    rgba(0, 0, 0, 0.28) 0px 0px 1px,
+    rgba(0, 0, 0, 0.36) 0px 2px 6px,
+    rgba(0, 0, 0, 0.42) 0px 8px 20px,
+    rgba(0, 0, 0, 0.54) 0px 20px 48px;
+  --ln-overlay: rgba(0, 0, 0, 0.6);
+  --ln-header-bg: rgba(13, 17, 23, 0.82);
+  --ln-preview-surface: #0f141b;
+  --ln-preview-overlay: rgba(13, 17, 23, 0.72);
+  --ln-preview-note: #97a3b6;
+  --ln-preview-chip: rgba(15, 20, 27, 0.72);
+  --ln-link-mention: #9dacff;
 }
 
 * {
@@ -614,7 +662,7 @@ textarea.ant-input::placeholder {
   gap: 16px;
   min-height: 56px;
   padding: 10px 24px;
-  background: rgba(255, 255, 255, 0.85) !important;
+  background: var(--ln-header-bg) !important;
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--ln-border-subtle);
@@ -903,6 +951,17 @@ textarea.ant-input::placeholder {
 
 .apple-shell__header .ant-btn {
   border-radius: var(--ln-radius-button) !important;
+}
+
+.apple-settings-button.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--ln-radius-pill) !important;
 }
 
 .apple-shell__header .ant-btn-default,

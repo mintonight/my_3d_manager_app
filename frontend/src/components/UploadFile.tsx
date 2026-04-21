@@ -3,6 +3,7 @@ import { Button, Input, Modal, Upload, message } from 'antd';
 import { FolderOpenOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RcFile } from 'antd/es/upload';
 import { api, extractError } from '../api';
+import { useI18n } from '../i18n';
 
 type Mode = 'file' | 'folder';
 
@@ -22,12 +23,48 @@ function relPath(file: RcFile): string {
 }
 
 export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone }: Props) {
+  const { isZh, formatNumber } = useI18n();
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<RcFile[]>([]);
   const [msg, setMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const isFolder = mode === 'folder';
+  const text = isZh
+    ? {
+        chooseFolderFirst: '请先选择文件夹',
+        chooseFileFirst: '请先选择文件',
+        uploadedCount: (count: number) => `已上传 ${formatNumber(count)} 个文件`,
+        committed: '新版本已提交',
+        uploaded: '文件已上传',
+        uploadFolder: '上传文件夹',
+        commitNewVersion: '提交新版本',
+        uploadNewFile: '上传新文件',
+        submit: '提交',
+        cancel: '取消',
+        chooseFolder: '选择文件夹',
+        chooseFile: '选择文件',
+        folderSummary: (count: number) =>
+          `共选中 ${formatNumber(count)} 个文件。已有同名文件会按新版本提交。`,
+        commitMessagePlaceholder: '提交说明，可选',
+      }
+    : {
+        chooseFolderFirst: 'Please choose a folder first',
+        chooseFileFirst: 'Please choose a file first',
+        uploadedCount: (count: number) => `Uploaded ${formatNumber(count)} files`,
+        committed: 'New version committed',
+        uploaded: 'File uploaded',
+        uploadFolder: 'Upload Folder',
+        commitNewVersion: 'Commit New Version',
+        uploadNewFile: 'Upload New File',
+        submit: 'Submit',
+        cancel: 'Cancel',
+        chooseFolder: 'Choose Folder',
+        chooseFile: 'Choose File',
+        folderSummary: (count: number) =>
+          `${formatNumber(count)} files selected. Existing files with the same name will be committed as new versions.`,
+        commitMessagePlaceholder: 'Commit message (optional)',
+      };
 
   const reset = () => {
     setFiles([]);
@@ -36,7 +73,7 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
 
   const submit = async () => {
     if (files.length === 0) {
-      message.warning(isFolder ? '请先选择文件夹' : '请先选择文件');
+      message.warning(isFolder ? text.chooseFolderFirst : text.chooseFileFirst);
       return;
     }
 
@@ -63,9 +100,9 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
       });
       if (isFolder) {
         const count = Array.isArray(response.data) ? response.data.length : files.length;
-        message.success(`已上传 ${count} 个文件`);
+        message.success(text.uploadedCount(count));
       } else {
-        message.success(fid ? '新版本已提交' : '文件已上传');
+        message.success(fid ? text.committed : text.uploaded);
       }
       setOpen(false);
       reset();
@@ -88,15 +125,15 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
         {buttonText}
       </Button>
       <Modal
-        title={isFolder ? '上传文件夹' : fid ? '提交新版本' : '上传新文件'}
+        title={isFolder ? text.uploadFolder : fid ? text.commitNewVersion : text.uploadNewFile}
         open={open}
         onCancel={() => {
           setOpen(false);
           reset();
         }}
         onOk={() => void submit()}
-        okText="提交"
-        cancelText="取消"
+        okText={text.submit}
+        cancelText={text.cancel}
         confirmLoading={submitting}
         width={isFolder ? 600 : 520}
       >
@@ -118,18 +155,21 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
           }))}
           maxCount={isFolder ? undefined : 1}
         >
-          <Button className="apple-pill-button apple-outline-button" icon={isFolder ? <FolderOpenOutlined /> : <UploadOutlined />}>
-            {isFolder ? '选择文件夹' : '选择文件'}
+          <Button
+            className="apple-pill-button apple-outline-button"
+            icon={isFolder ? <FolderOpenOutlined /> : <UploadOutlined />}
+          >
+            {isFolder ? text.chooseFolder : text.chooseFile}
           </Button>
         </Upload>
         {isFolder && files.length > 0 && (
-          <div style={{ marginTop: 8, color: '#6e6e73', fontSize: 12 }}>
-            共选中 {files.length} 个文件。已有同名文件会按新版本提交。
+          <div style={{ marginTop: 8, color: 'var(--ln-preview-note)', fontSize: 12 }}>
+            {text.folderSummary(files.length)}
           </div>
         )}
         <Input.TextArea
           rows={3}
-          placeholder={isFolder ? '提交说明，可选' : '提交说明，可选'}
+          placeholder={text.commitMessagePlaceholder}
           value={msg}
           onChange={(event) => setMsg(event.target.value)}
           style={{ marginTop: 12 }}

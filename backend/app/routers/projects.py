@@ -21,8 +21,10 @@ from ..deps import (
     require_project_role,
 )
 from ..models import Comment, CommentMention, Notification
+from ..models import DownloadNotification
 from ..models import File as FileModel
 from ..models import FileVersion, Project, ProjectMember, User
+from ..notification_events import create_project_download_notifications
 from ..schemas import (
     MemberAdd,
     MemberOut,
@@ -98,6 +100,9 @@ def _full_backup_payload(db: Session) -> dict:
                 "email": row.email,
                 "password_hash": row.password_hash,
                 "is_admin": row.is_admin,
+                "ui_language": row.ui_language,
+                "ui_theme": row.ui_theme,
+                "edrawings_exe_path": row.edrawings_exe_path,
                 "created_at": _dt(row.created_at),
             }
             for row in db.query(User).order_by(User.id.asc()).all()
@@ -172,6 +177,21 @@ def _full_backup_payload(db: Session) -> dict:
             }
             for row in db.query(Notification).order_by(Notification.id.asc()).all()
         ],
+        "download_notifications": [
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "project_id": row.project_id,
+                "file_id": row.file_id,
+                "file_version_id": row.file_version_id,
+                "actor_id": row.actor_id,
+                "type": row.type,
+                "message": row.message,
+                "is_read": row.is_read,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(DownloadNotification).order_by(DownloadNotification.id.asc()).all()
+        ],
     }
 
 
@@ -225,6 +245,7 @@ def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"backup missing blobs: {missing[:5]}")
 
     db.query(FileModel).update({FileModel.current_version_id: None})
+    db.query(DownloadNotification).delete(synchronize_session=False)
     db.query(Notification).delete(synchronize_session=False)
     db.query(CommentMention).delete(synchronize_session=False)
     db.query(Comment).delete(synchronize_session=False)
@@ -243,6 +264,9 @@ def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -
                 email=row["email"],
                 password_hash=row["password_hash"],
                 is_admin=row["is_admin"],
+                ui_language=row.get("ui_language", "zh-CN"),
+                ui_theme=row.get("ui_theme", "light"),
+                edrawings_exe_path=row.get("edrawings_exe_path"),
                 created_at=_parse_dt(row["created_at"]),
             )
         )
@@ -328,6 +352,23 @@ def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -
                 user_id=row["user_id"],
                 comment_id=row["comment_id"],
                 type=row["type"],
+                is_read=row["is_read"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("download_notifications", []):
+        db.add(
+            DownloadNotification(
+                id=row["id"],
+                user_id=row["user_id"],
+                project_id=row["project_id"],
+                file_id=row["file_id"],
+                file_version_id=row["file_version_id"],
+                actor_id=row["actor_id"],
+                type=row["type"],
+                message=row["message"],
                 is_read=row["is_read"],
                 created_at=_parse_dt(row["created_at"]),
             )
@@ -483,7 +524,7 @@ def download_project(
     ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
-    p, _, _ = ctx
+    p, user, _ = ctx
     files = db.query(FileModel).filter(FileModel.project_id == p.id).all()
 
     entries: list[tuple[str, Path]] = []
@@ -498,6 +539,9 @@ def download_project(
         except FileNotFoundError:
             continue
         entries.append((f.name, blob_path))
+
+    create_project_download_notifications(db, p, user)
+    db.commit()
 
     encoded = quote(f"{p.name}.zip")
     return StreamingResponse(

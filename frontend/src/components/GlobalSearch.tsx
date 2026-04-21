@@ -3,14 +3,30 @@ import { Button, Divider, Empty, Input, Popover, Space, Spin, Tag, Typography } 
 import { SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import type { SearchResult } from '../types';
 
 export default function GlobalSearch() {
   const navigate = useNavigate();
+  const { isZh, roleLabel } = useI18n();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult>({ projects: [], files: [] });
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+
+  const text = isZh
+    ? {
+        noResults: '没有匹配结果',
+        projects: '项目',
+        files: '文件',
+        placeholder: '搜索项目或文件',
+      }
+    : {
+        noResults: 'No matching results',
+        projects: 'Projects',
+        files: 'Files',
+        placeholder: 'Search projects or files',
+      };
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -51,12 +67,12 @@ export default function GlobalSearch() {
           <Spin />
         </div>
       ) : total === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配结果" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text.noResults} />
       ) : (
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           {results.projects.length > 0 && (
             <div>
-              <Typography.Text type="secondary">项目</Typography.Text>
+              <Typography.Text type="secondary">{text.projects}</Typography.Text>
               <div style={{ marginTop: 8 }}>
                 {results.projects.map((project) => (
                   <Button
@@ -73,7 +89,7 @@ export default function GlobalSearch() {
                     <Space direction="vertical" size={2} style={{ width: '100%', alignItems: 'flex-start' }}>
                       <Space wrap>
                         <Typography.Text strong>{project.name}</Typography.Text>
-                        <Tag>{project.my_role}</Tag>
+                        <Tag>{roleLabel(project.my_role)}</Tag>
                       </Space>
                       {project.description && (
                         <Typography.Text type="secondary" ellipsis style={{ maxWidth: 360 }}>
@@ -91,7 +107,7 @@ export default function GlobalSearch() {
 
           {results.files.length > 0 && (
             <div>
-              <Typography.Text type="secondary">文件</Typography.Text>
+              <Typography.Text type="secondary">{text.files}</Typography.Text>
               <div style={{ marginTop: 8 }}>
                 {results.files.map((file) => (
                   <Button
@@ -136,7 +152,7 @@ export default function GlobalSearch() {
         allowClear
         value={query}
         prefix={<SearchOutlined />}
-        placeholder="搜索项目或文件"
+        placeholder={text.placeholder}
         style={{ width: 360, maxWidth: '100%' }}
         onFocus={() => {
           if (query.trim()) setOpen(true);

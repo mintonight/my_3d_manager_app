@@ -5,6 +5,8 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 Role = Literal["owner", "editor", "viewer"]
+UiLanguage = Literal["zh-CN", "en-US"]
+UiTheme = Literal["light", "dark"]
 
 
 class UserCreate(BaseModel):
@@ -23,10 +25,19 @@ class UserOut(BaseModel):
     username: str
     email: EmailStr
     is_admin: bool
+    ui_language: UiLanguage
+    ui_theme: UiTheme
+    edrawings_exe_path: str | None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class UserSettingsUpdate(BaseModel):
+    ui_language: UiLanguage | None = None
+    ui_theme: UiTheme | None = None
+    edrawings_exe_path: str | None = Field(default=None, max_length=512)
 
 
 class Token(BaseModel):
@@ -134,9 +145,9 @@ class CommentOut(BaseModel):
 class NotificationOut(BaseModel):
     id: int
     user_id: int
-    comment_id: int
+    comment_id: int | None
     project_id: int
-    file_id: int
+    file_id: int | None
     file_version_id: int | None
     type: str
     is_read: bool

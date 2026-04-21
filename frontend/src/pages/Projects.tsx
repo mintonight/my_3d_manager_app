@@ -15,18 +15,13 @@ import {
 import { Link } from 'react-router-dom';
 import { api, extractError, getToken } from '../api';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import type { Project } from '../types';
 
 const ROLE_COLOR: Record<string, string> = {
   owner: 'red',
   editor: 'blue',
   viewer: 'default',
-};
-
-const ROLE_LABEL: Record<string, string> = {
-  owner: '所有者',
-  editor: '编辑者',
-  viewer: '查看者',
 };
 
 function saveBlob(blob: Blob, filename: string) {
@@ -45,6 +40,7 @@ function saveBlob(blob: Blob, filename: string) {
 
 export default function Projects() {
   const { user } = useAuth();
+  const { isZh, formatDateTime, roleLabel } = useI18n();
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [projectBackupLoading, setProjectBackupLoading] = useState(false);
@@ -53,6 +49,76 @@ export default function Projects() {
   const [open, setOpen] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
   const [form] = Form.useForm();
+
+  const text = isZh
+    ? {
+        created: '项目已创建',
+        projectBackupFailed: (status: number) => `项目备份失败: ${status}`,
+        projectBackupName: '项目备份.zip',
+        projectBackupStarted: '项目备份已开始下载',
+        dataExportFailed: (status: number) => `数据导出失败: ${status}`,
+        dataBackupName: '数据备份.zip',
+        dataExportStarted: '数据备份已开始下载',
+        dataImportFailed: (status: number) => `数据恢复失败: ${status}`,
+        dataRestored: '数据恢复完成',
+        workspace: '工作区',
+        projectsLabel: '项目',
+        allProjects: '全部项目',
+        myProjects: '我的项目',
+        projectBackup: '项目备份',
+        dataExport: '数据导出',
+        dataImport: '数据恢复',
+        restoreConfirmTitle: '确定恢复数据备份？',
+        restoreConfirmContent:
+          '恢复会覆盖当前项目、文件版本、成员、用户和评论通知数据。',
+        restore: '恢复',
+        cancel: '取消',
+        newProject: '新建项目',
+        empty: '还没有项目',
+        openProject: '打开',
+        admin: '管理员',
+        noDescription: '暂无描述',
+        createProject: '新建项目',
+        create: '创建',
+        projectName: '项目名称',
+        projectNamePlaceholder: '例如：齿轮箱设计',
+        description: '简介',
+        descriptionPlaceholder: '可选',
+      }
+    : {
+        created: 'Project created',
+        projectBackupFailed: (status: number) => `Project backup failed: ${status}`,
+        projectBackupName: 'project-backup.zip',
+        projectBackupStarted: 'Project backup download started',
+        dataExportFailed: (status: number) => `Data export failed: ${status}`,
+        dataBackupName: 'data-backup.zip',
+        dataExportStarted: 'Data backup download started',
+        dataImportFailed: (status: number) => `Data restore failed: ${status}`,
+        dataRestored: 'Data restored',
+        workspace: 'Workspace',
+        projectsLabel: 'Projects',
+        allProjects: 'All Projects',
+        myProjects: 'My Projects',
+        projectBackup: 'Project Backup',
+        dataExport: 'Export Data',
+        dataImport: 'Restore Data',
+        restoreConfirmTitle: 'Restore a full data backup?',
+        restoreConfirmContent:
+          'This will overwrite current projects, file versions, members, users, comments, and notifications.',
+        restore: 'Restore',
+        cancel: 'Cancel',
+        newProject: 'New Project',
+        empty: 'No projects yet',
+        openProject: 'Open',
+        admin: 'Admin',
+        noDescription: 'No description',
+        createProject: 'Create Project',
+        create: 'Create',
+        projectName: 'Project Name',
+        projectNamePlaceholder: 'For example: Gearbox Design',
+        description: 'Description',
+        descriptionPlaceholder: 'Optional',
+      };
 
   const load = async () => {
     setLoading(true);
@@ -73,7 +139,7 @@ export default function Projects() {
   const create = async (values: { name: string; description: string }) => {
     try {
       await api.post('/projects', values);
-      message.success('项目已创建');
+      message.success(text.created);
       setOpen(false);
       form.resetFields();
       await load();
@@ -88,9 +154,9 @@ export default function Projects() {
       const response = await fetch('/api/projects/backup/all', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-      if (!response.ok) throw new Error(`项目备份失败: ${response.status}`);
-      saveBlob(await response.blob(), '项目备份.zip');
-      message.success('项目备份已开始下载');
+      if (!response.ok) throw new Error(text.projectBackupFailed(response.status));
+      saveBlob(await response.blob(), text.projectBackupName);
+      message.success(text.projectBackupStarted);
     } catch (error) {
       message.error(String(error));
     } finally {
@@ -104,9 +170,9 @@ export default function Projects() {
       const response = await fetch('/api/projects/backup/data/export', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-      if (!response.ok) throw new Error(`数据导出失败: ${response.status}`);
-      saveBlob(await response.blob(), '数据备份.zip');
-      message.success('数据备份已开始下载');
+      if (!response.ok) throw new Error(text.dataExportFailed(response.status));
+      saveBlob(await response.blob(), text.dataBackupName);
+      message.success(text.dataExportStarted);
     } catch (error) {
       message.error(String(error));
     } finally {
@@ -125,7 +191,7 @@ export default function Projects() {
         body,
       });
       if (!response.ok) {
-        let detail = `数据恢复失败: ${response.status}`;
+        let detail = text.dataImportFailed(response.status);
         try {
           const payload = await response.json();
           if (payload?.detail) detail = String(payload.detail);
@@ -134,7 +200,7 @@ export default function Projects() {
         }
         throw new Error(detail);
       }
-      message.success('数据恢复完成');
+      message.success(text.dataRestored);
       await load();
     } catch (error) {
       message.error(String(error));
@@ -148,9 +214,9 @@ export default function Projects() {
     <div className="apple-page">
       <section className="apple-hero">
         <div className="apple-hero__copy">
-          <p className="apple-hero__eyebrow">Workspace</p>
+          <p className="apple-hero__eyebrow">{text.workspace}</p>
           <Typography.Title className="apple-hero__title">
-            {user?.is_admin ? '全部项目' : '我的项目'}
+            {user?.is_admin ? text.allProjects : text.myProjects}
           </Typography.Title>
           <Typography.Paragraph className="apple-hero__subtitle">
             {user?.email}
@@ -158,7 +224,7 @@ export default function Projects() {
         </div>
         <div className="apple-hero__meta">
           <div className="apple-stat">
-            <span className="apple-stat__label">Projects</span>
+            <span className="apple-stat__label">{text.projectsLabel}</span>
             <span className="apple-stat__value">{items.length}</span>
           </div>
           <Space wrap>
@@ -169,21 +235,21 @@ export default function Projects() {
                   onClick={() => void downloadProjectBackup()}
                   loading={projectBackupLoading}
                 >
-                  项目备份
+                  {text.projectBackup}
                 </Button>
                 <Button
                   className="apple-pill-button apple-outline-button"
                   onClick={() => void exportDataBackup()}
                   loading={dataExportLoading}
                 >
-                  数据导出
+                  {text.dataExport}
                 </Button>
                 <Button
                   className="apple-pill-button apple-outline-button"
                   onClick={() => restoreInputRef.current?.click()}
                   loading={dataImportLoading}
                 >
-                  数据恢复
+                  {text.dataImport}
                 </Button>
                 <input
                   ref={restoreInputRef}
@@ -194,10 +260,10 @@ export default function Projects() {
                     const file = event.target.files?.[0];
                     if (!file) return;
                     Modal.confirm({
-                      title: '确定恢复数据备份？',
-                      content: '恢复会覆盖当前项目、文件版本、成员、用户和评论通知数据。',
-                      okText: '恢复',
-                      cancelText: '取消',
+                      title: text.restoreConfirmTitle,
+                      content: text.restoreConfirmContent,
+                      okText: text.restore,
+                      cancelText: text.cancel,
                       okButtonProps: { danger: true },
                       onOk: () => restoreDataBackup(file),
                     });
@@ -206,7 +272,7 @@ export default function Projects() {
               </>
             )}
             <Button className="apple-pill-button" type="primary" onClick={() => setOpen(true)}>
-              新建项目
+              {text.newProject}
             </Button>
           </Space>
         </div>
@@ -215,7 +281,7 @@ export default function Projects() {
       <Card className="apple-surface apple-section-card" bordered={false}>
         <List
           loading={loading}
-          locale={{ emptyText: <Empty className="apple-empty" description="还没有项目" /> }}
+          locale={{ emptyText: <Empty className="apple-empty" description={text.empty} /> }}
           dataSource={items}
           renderItem={(project) => (
             <List.Item
@@ -223,7 +289,7 @@ export default function Projects() {
               actions={[
                 <Link key="open" to={`/projects/${project.id}`}>
                   <Button className="apple-pill-button apple-outline-button" size="small">
-                    打开
+                    {text.openProject}
                   </Button>
                 </Link>,
               ]}
@@ -234,20 +300,20 @@ export default function Projects() {
                   <Space wrap>
                     <Link to={`/projects/${project.id}`}>{project.name}</Link>
                     {user?.is_admin && project.owner_id !== user.id ? (
-                      <Tag color="gold">管理员</Tag>
+                      <Tag color="gold">{text.admin}</Tag>
                     ) : (
-                      <Tag color={ROLE_COLOR[project.my_role]}>{ROLE_LABEL[project.my_role]}</Tag>
+                      <Tag color={ROLE_COLOR[project.my_role]}>{roleLabel(project.my_role)}</Tag>
                     )}
                   </Space>
                 }
                 description={
                   project.description || (
-                    <Typography.Text type="secondary">暂无描述</Typography.Text>
+                    <Typography.Text type="secondary">{text.noDescription}</Typography.Text>
                   )
                 }
               />
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {new Date(project.created_at).toLocaleString('zh-CN')}
+                {formatDateTime(project.created_at)}
               </Typography.Text>
             </List.Item>
           )}
@@ -255,23 +321,23 @@ export default function Projects() {
       </Card>
 
       <Modal
-        title="新建项目"
+        title={text.createProject}
         open={open}
         onCancel={() => setOpen(false)}
         onOk={() => form.submit()}
-        okText="创建"
-        cancelText="取消"
+        okText={text.create}
+        cancelText={text.cancel}
       >
         <Form form={form} layout="vertical" onFinish={create}>
           <Form.Item
             name="name"
-            label="项目名称"
+            label={text.projectName}
             rules={[{ required: true, max: 128 }]}
           >
-            <Input placeholder="例如：齿轮箱设计" />
+            <Input placeholder={text.projectNamePlaceholder} />
           </Form.Item>
-          <Form.Item name="description" label="简介" initialValue="">
-            <Input.TextArea rows={3} placeholder="可选" maxLength={512} />
+          <Form.Item name="description" label={text.description} initialValue="">
+            <Input.TextArea rows={3} placeholder={text.descriptionPlaceholder} maxLength={512} />
           </Form.Item>
         </Form>
       </Modal>

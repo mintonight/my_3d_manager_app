@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { api, clearToken, getToken, setToken } from './api';
-import type { User } from './types';
+import { clearStoredUserPreferences, persistUserPreferences } from './preferences';
+import type { User, UserSettingsUpdate } from './types';
 
 interface AuthCtx {
   user: User | null;
@@ -8,6 +9,7 @@ interface AuthCtx {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
+  updateSettings: (patch: UserSettingsUpdate) => Promise<User>;
 }
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -25,8 +27,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const r = await api.get<User>('/auth/me');
       setUser(r.data);
+      persistUserPreferences(r.data);
     } catch {
       setUser(null);
+      clearStoredUserPreferences();
     } finally {
       setLoading(false);
     }
@@ -45,10 +49,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     clearToken();
     setUser(null);
+    clearStoredUserPreferences();
     window.location.href = '/login';
   };
 
-  return <Ctx.Provider value={{ user, loading, login, logout, refresh }}>{children}</Ctx.Provider>;
+  const updateSettings = async (patch: UserSettingsUpdate) => {
+    const response = await api.patch<User>('/auth/me/settings', patch);
+    setUser(response.data);
+    persistUserPreferences(response.data);
+    return response.data;
+  };
+
+  return (
+    <Ctx.Provider value={{ user, loading, login, logout, refresh, updateSettings }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useAuth() {

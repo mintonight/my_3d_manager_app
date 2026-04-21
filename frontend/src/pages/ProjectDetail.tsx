@@ -19,18 +19,13 @@ import { SearchOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, extractError, getToken } from '../api';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import UploadFile from '../components/UploadFile';
 import MemberPanel from '../components/MemberPanel';
 import PreviewModal from '../components/FilePreview/PreviewModal';
 import { isPreviewable } from '../components/FilePreview/utils';
 import CommentPanel from '../components/CommentPanel';
 import type { FileItem, Project, Role } from '../types';
-
-const ROLE_LABEL: Record<Role, string> = {
-  owner: '所有者',
-  editor: '编辑者',
-  viewer: '查看者',
-};
 
 function canEdit(role?: Role) {
   return role === 'owner' || role === 'editor';
@@ -55,6 +50,7 @@ export default function ProjectDetail() {
   const pidNum = Number(pid);
   const nav = useNavigate();
   const { user } = useAuth();
+  const { isZh, formatDateTime, roleLabel } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [allFiles, setAllFiles] = useState<FileItem[]>([]);
@@ -69,6 +65,80 @@ export default function ProjectDetail() {
   const targetFileId = Number(searchParams.get('fileComment') || '');
   const targetCommentId = Number(searchParams.get('commentId') || '');
   const targetNotificationId = Number(searchParams.get('notificationId') || '');
+
+  const text = isZh
+    ? {
+        allProjects: '全部项目',
+        myProjects: '我的项目',
+        workspace: '项目工作区',
+        filesLabel: '文件',
+        subtitle: '版本历史、文件预览和协作成员都收束在这一处。',
+        admin: '管理员',
+        downloadProjectFailed: (status: number) => `下载失败: ${status}`,
+        projectDownloaded: '项目已打包下载',
+        deletedFile: '文件已删除',
+        deletedProject: '项目已删除',
+        filesTab: (count: number) => `文件 (${count})`,
+        membersTab: '成员',
+        uploadNewFile: '上传新文件',
+        uploadFolder: '上传文件夹',
+        viewerInfo: '查看者只能浏览、搜索、评论和下载文件。',
+        searchPlaceholder: '在当前项目内搜索文件',
+        noSearchResults: '没有匹配的文件',
+        noFiles: '还没有文件',
+        fileName: '文件名',
+        currentVersion: '当前版本',
+        noVersion: '无版本',
+        createdAt: '创建时间',
+        actions: '操作',
+        preview: '预览',
+        downloadCurrent: '下载当前版本',
+        comments: '评论',
+        commitNewVersion: '提交新版本',
+        history: '历史',
+        delete: '删除',
+        deleteProject: '删除项目',
+        deleteProjectConfirm: '确定删除这个项目？所有文件和版本都会被一起删除。',
+        deleteFileConfirm: '确定删除这个文件及其所有版本？',
+        downloadProject: '下载项目',
+        fileCommentsTitle: (name: string) => `文件评论 · ${name}`,
+      }
+    : {
+        allProjects: 'All Projects',
+        myProjects: 'My Projects',
+        workspace: 'Project Workspace',
+        filesLabel: 'Files',
+        subtitle: 'Version history, file preview, and collaborators are gathered in one place.',
+        admin: 'Admin',
+        downloadProjectFailed: (status: number) => `Download failed: ${status}`,
+        projectDownloaded: 'Project archive downloaded',
+        deletedFile: 'File deleted',
+        deletedProject: 'Project deleted',
+        filesTab: (count: number) => `Files (${count})`,
+        membersTab: 'Members',
+        uploadNewFile: 'Upload New File',
+        uploadFolder: 'Upload Folder',
+        viewerInfo: 'Viewers can browse, search, comment on, and download files only.',
+        searchPlaceholder: 'Search files in this project',
+        noSearchResults: 'No matching files',
+        noFiles: 'No files yet',
+        fileName: 'File Name',
+        currentVersion: 'Current Version',
+        noVersion: 'No Version',
+        createdAt: 'Created At',
+        actions: 'Actions',
+        preview: 'Preview',
+        downloadCurrent: 'Download Current',
+        comments: 'Comments',
+        commitNewVersion: 'Commit New Version',
+        history: 'History',
+        delete: 'Delete',
+        deleteProject: 'Delete Project',
+        deleteProjectConfirm: 'Delete this project? All files and versions will be removed.',
+        deleteFileConfirm: 'Delete this file and all of its versions?',
+        downloadProject: 'Download Project',
+        fileCommentsTitle: (name: string) => `File Comments · ${name}`,
+      };
 
   const load = async () => {
     setLoading(true);
@@ -140,7 +210,7 @@ export default function ProjectDetail() {
       const response = await fetch(`/api/projects/${pidNum}/files/${fid}/versions/${vid}/download`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!response.ok) throw new Error(`下载失败: ${response.status}`);
+      if (!response.ok) throw new Error(text.downloadProjectFailed(response.status));
       const blob = await response.blob();
       saveBlob(blob, name);
     } catch (error) {
@@ -151,7 +221,7 @@ export default function ProjectDetail() {
   const deleteFile = async (fid: number) => {
     try {
       await api.delete(`/projects/${pidNum}/files/${fid}`);
-      message.success('文件已删除');
+      message.success(text.deletedFile);
       await load();
     } catch (error) {
       message.error(extractError(error));
@@ -161,7 +231,7 @@ export default function ProjectDetail() {
   const deleteProject = async () => {
     try {
       await api.delete(`/projects/${pidNum}`);
-      message.success('项目已删除');
+      message.success(text.deletedProject);
       nav('/projects');
     } catch (error) {
       message.error(extractError(error));
@@ -177,12 +247,12 @@ export default function ProjectDetail() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
-        message.error(`下载失败: ${response.status}`);
+        message.error(text.downloadProjectFailed(response.status));
         return;
       }
       const blob = await response.blob();
       saveBlob(blob, `${project.name}.zip`);
-      message.success('项目已打包下载');
+      message.success(text.projectDownloaded);
     } catch (error) {
       message.error(String(error));
     } finally {
@@ -201,32 +271,30 @@ export default function ProjectDetail() {
   const editable = canEdit(project.my_role);
   const isOwner = project.my_role === 'owner';
   const adminOverride = !!user?.is_admin && project.owner_id !== user.id;
-  const roleTagText = adminOverride ? '管理员' : ROLE_LABEL[project.my_role];
+  const roleTagText = adminOverride ? text.admin : roleLabel(project.my_role);
 
   return (
     <div className="apple-page">
       <Breadcrumb
         className="apple-page__crumbs"
         items={[
-          { title: <Link to="/projects">{user?.is_admin ? '全部项目' : '我的项目'}</Link> },
+          { title: <Link to="/projects">{user?.is_admin ? text.allProjects : text.myProjects}</Link> },
           { title: project.name },
         ]}
       />
 
       <section className="apple-hero">
         <div className="apple-hero__copy">
-          <p className="apple-hero__eyebrow">Project workspace</p>
-          <Typography.Title className="apple-hero__title">
-            {project.name}
-          </Typography.Title>
+          <p className="apple-hero__eyebrow">{text.workspace}</p>
+          <Typography.Title className="apple-hero__title">{project.name}</Typography.Title>
           <Typography.Paragraph className="apple-hero__subtitle">
-            {project.description || '版本历史、文件预览和协作成员都收束在这一处。'}
+            {project.description || text.subtitle}
           </Typography.Paragraph>
         </div>
         <div className="apple-hero__meta">
           <Tag color={adminOverride ? 'gold' : 'blue'}>{roleTagText}</Tag>
           <div className="apple-stat">
-            <span className="apple-stat__label">Files</span>
+            <span className="apple-stat__label">{text.filesLabel}</span>
             <span className="apple-stat__value">{allFiles.length}</span>
           </div>
           <Space wrap>
@@ -236,18 +304,18 @@ export default function ProjectDetail() {
               disabled={allFiles.length === 0}
               loading={projectDownloading}
             >
-              下载项目
+              {text.downloadProject}
             </Button>
             {isOwner && (
               <Popconfirm
-                title="确定删除这个项目？所有文件和版本都会被一起删除。"
+                title={text.deleteProjectConfirm}
                 onConfirm={() => void deleteProject()}
-                okText="删除"
+                okText={text.delete}
                 okButtonProps={{ danger: true }}
-                cancelText="取消"
+                cancelText={isZh ? '取消' : 'Cancel'}
               >
                 <Button className="apple-pill-button" danger>
-                  删除项目
+                  {text.deleteProject}
                 </Button>
               </Popconfirm>
             )}
@@ -261,22 +329,18 @@ export default function ProjectDetail() {
           items={[
             {
               key: 'files',
-              label: `文件 (${allFiles.length})`,
+              label: text.filesTab(allFiles.length),
               children: (
                 <div>
                   <div className="apple-toolbar">
                     <div className="apple-toolbar__group">
                       {editable ? (
                         <>
-                          <UploadFile pid={pidNum} mode="file" buttonText="上传新文件" onDone={load} />
-                          <UploadFile pid={pidNum} mode="folder" buttonText="上传文件夹" onDone={load} />
+                          <UploadFile pid={pidNum} mode="file" buttonText={text.uploadNewFile} onDone={load} />
+                          <UploadFile pid={pidNum} mode="folder" buttonText={text.uploadFolder} onDone={load} />
                         </>
                       ) : (
-                        <Alert
-                          type="info"
-                          message="查看者只能浏览、搜索、评论和下载文件。"
-                          showIcon
-                        />
+                        <Alert type="info" message={text.viewerInfo} showIcon />
                       )}
                     </div>
                     <Input
@@ -285,7 +349,7 @@ export default function ProjectDetail() {
                       value={fileQuery}
                       prefix={<SearchOutlined />}
                       suffix={searching ? <Spin size="small" /> : null}
-                      placeholder="在当前项目内搜索文件"
+                      placeholder={text.searchPlaceholder}
                       style={{ width: 320, maxWidth: '100%' }}
                       onChange={(event) => setFileQuery(event.target.value)}
                     />
@@ -294,7 +358,7 @@ export default function ProjectDetail() {
                   {files.length === 0 ? (
                     <Empty
                       className="apple-empty"
-                      description={fileQuery.trim() ? '没有匹配的文件' : '还没有文件'}
+                      description={fileQuery.trim() ? text.noSearchResults : text.noFiles}
                     />
                   ) : (
                     <Table
@@ -304,7 +368,7 @@ export default function ProjectDetail() {
                       sortDirections={['ascend', 'descend']}
                       columns={[
                         {
-                          title: '文件名',
+                          title: text.fileName,
                           dataIndex: 'name',
                           sorter: (a: FileItem, b: FileItem) =>
                             a.name.localeCompare(b.name, 'zh-Hans-CN', {
@@ -316,28 +380,28 @@ export default function ProjectDetail() {
                           ),
                         },
                         {
-                          title: '当前版本',
+                          title: text.currentVersion,
                           dataIndex: 'current_version_no',
                           sorter: (a: FileItem, b: FileItem) =>
                             (a.current_version_no ?? -1) - (b.current_version_no ?? -1),
                           render: (value: number | null) =>
-                            value ? <Tag color="green">v{value}</Tag> : <Tag>无版本</Tag>,
+                            value ? <Tag color="green">v{value}</Tag> : <Tag>{text.noVersion}</Tag>,
                         },
                         {
-                          title: '创建时间',
+                          title: text.createdAt,
                           dataIndex: 'created_at',
                           defaultSortOrder: 'descend',
                           sorter: (a: FileItem, b: FileItem) =>
                             new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-                          render: (createdAt: string) => new Date(createdAt).toLocaleString('zh-CN'),
+                          render: (createdAt: string) => formatDateTime(createdAt),
                         },
                         {
-                          title: '操作',
+                          title: text.actions,
                           render: (_: unknown, row: FileItem) => (
                             <Space wrap>
                               {row.current_version_id && isPreviewable(row.name) && (
                                 <Button size="small" type="link" onClick={() => setPreviewing(row)}>
-                                  预览
+                                  {text.preview}
                                 </Button>
                               )}
                               {row.current_version_id && (
@@ -352,7 +416,7 @@ export default function ProjectDetail() {
                                     )
                                   }
                                 >
-                                  下载当前版本
+                                  {text.downloadCurrent}
                                 </Button>
                               )}
                               <Button
@@ -360,31 +424,31 @@ export default function ProjectDetail() {
                                 className="apple-outline-button"
                                 onClick={() => setCommentFile(row)}
                               >
-                                评论
+                                {text.comments}
                               </Button>
                               {editable && (
                                 <UploadFile
                                   pid={pidNum}
                                   fid={row.id}
-                                  buttonText="提交新版本"
+                                  buttonText={text.commitNewVersion}
                                   onDone={load}
                                 />
                               )}
                               <Link to={`/projects/${pidNum}/files/${row.id}`}>
                                 <Button size="small" className="apple-outline-button">
-                                  历史
+                                  {text.history}
                                 </Button>
                               </Link>
                               {isOwner && (
                                 <Popconfirm
-                                  title="确定删除这个文件及其所有版本？"
+                                  title={text.deleteFileConfirm}
                                   onConfirm={() => void deleteFile(row.id)}
-                                  okText="删除"
+                                  okText={text.delete}
                                   okButtonProps={{ danger: true }}
-                                  cancelText="取消"
+                                  cancelText={isZh ? '取消' : 'Cancel'}
                                 >
                                   <Button size="small" danger>
-                                    删除
+                                    {text.delete}
                                   </Button>
                                 </Popconfirm>
                               )}
@@ -399,7 +463,7 @@ export default function ProjectDetail() {
             },
             {
               key: 'members',
-              label: '成员',
+              label: text.membersTab,
               children: <MemberPanel pid={pidNum} myRole={project.my_role} />,
             },
           ]}
@@ -423,7 +487,7 @@ export default function ProjectDetail() {
           pid={pidNum}
           fid={commentFile.id}
           open={!!commentFile}
-          title={`文件评论 · ${commentFile.name}`}
+          title={text.fileCommentsTitle(commentFile.name)}
           currentUser={user}
           onClose={closeFileComments}
           highlightCommentId={targetCommentId || undefined}

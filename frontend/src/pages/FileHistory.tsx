@@ -14,6 +14,7 @@ import {
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, extractError, getToken } from '../api';
 import { useAuth } from '../auth';
+import { useI18n } from '../i18n';
 import PreviewModal from '../components/FilePreview/PreviewModal';
 import { isPreviewable } from '../components/FilePreview/utils';
 import CommentPanel from '../components/CommentPanel';
@@ -34,6 +35,7 @@ export default function FileHistory() {
   const pidNum = Number(pid);
   const fidNum = Number(fid);
   const { user } = useAuth();
+  const { isZh, formatDateTime } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [file, setFile] = useState<FileItem | null>(null);
@@ -45,6 +47,42 @@ export default function FileHistory() {
   const targetVersionId = Number(searchParams.get('versionComment') || '');
   const targetCommentId = Number(searchParams.get('commentId') || '');
   const targetNotificationId = Number(searchParams.get('notificationId') || '');
+
+  const text = isZh
+    ? {
+        allProjects: '全部项目',
+        myProjects: '我的项目',
+        timeline: '文件时间线',
+        subtitle: '当前文件的版本时间线、提交信息与回滚入口。',
+        versionsLabel: '版本数',
+        noCommitMessage: '没有提交说明',
+        preview: '预览',
+        download: '下载',
+        comments: '评论',
+        rollback: '回滚',
+        rollbackTo: '回滚到此版本',
+        rollbackConfirm: (versionNo: number) =>
+          `回滚到 v${versionNo}？当前版本指针会移动到这里，历史版本仍会保留。`,
+        currentVersion: '当前版本',
+        commentsTitle: (versionNo: number) => `版本评论 · v${versionNo}`,
+      }
+    : {
+        allProjects: 'All Projects',
+        myProjects: 'My Projects',
+        timeline: 'File Timeline',
+        subtitle: 'Version timeline, commit information, and rollback entry for the current file.',
+        versionsLabel: 'Versions',
+        noCommitMessage: 'No commit message',
+        preview: 'Preview',
+        download: 'Download',
+        comments: 'Comments',
+        rollback: 'Rollback',
+        rollbackTo: 'Rollback to This Version',
+        rollbackConfirm: (versionNo: number) =>
+          `Rollback to v${versionNo}? The current pointer will move here while history stays intact.`,
+        currentVersion: 'Current Version',
+        commentsTitle: (versionNo: number) => `Version Comments · v${versionNo}`,
+      };
 
   const load = async () => {
     setLoading(true);
@@ -88,7 +126,7 @@ export default function FileHistory() {
   const rollback = async (versionId: number) => {
     try {
       await api.post(`/projects/${pidNum}/files/${fidNum}/rollback/${versionId}`);
-      message.success('已回滚到指定版本');
+      message.success(isZh ? '已回滚到指定版本' : 'Rolled back to the selected version');
       await load();
     } catch (error) {
       message.error(extractError(error));
@@ -128,7 +166,7 @@ export default function FileHistory() {
       <Breadcrumb
         className="apple-page__crumbs"
         items={[
-          { title: <Link to="/projects">{user?.is_admin ? '全部项目' : '我的项目'}</Link> },
+          { title: <Link to="/projects">{user?.is_admin ? text.allProjects : text.myProjects}</Link> },
           { title: <Link to={`/projects/${pidNum}`}>{project.name}</Link> },
           { title: file.name },
         ]}
@@ -136,21 +174,19 @@ export default function FileHistory() {
 
       <section className="apple-hero">
         <div className="apple-hero__copy">
-          <p className="apple-hero__eyebrow">File timeline</p>
-          <Typography.Title className="apple-hero__title">
-            {file.name}
-          </Typography.Title>
+          <p className="apple-hero__eyebrow">{text.timeline}</p>
+          <Typography.Title className="apple-hero__title">{file.name}</Typography.Title>
           <Typography.Paragraph className="apple-hero__subtitle">
-            当前文件的版本时间线、提交信息与回滚入口。
+            {text.subtitle}
           </Typography.Paragraph>
         </div>
         <div className="apple-hero__meta">
           <div className="apple-stat">
-            <span className="apple-stat__label">Current</span>
+            <span className="apple-stat__label">{text.currentVersion}</span>
             <span className="apple-stat__value">v{file.current_version_no ?? '0'}</span>
           </div>
           <div className="apple-stat">
-            <span className="apple-stat__label">Versions</span>
+            <span className="apple-stat__label">{text.versionsLabel}</span>
             <span className="apple-stat__value">{versions.length}</span>
           </div>
         </div>
@@ -163,7 +199,7 @@ export default function FileHistory() {
             color: version.is_current ? 'green' : 'gray',
             label: (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {new Date(version.created_at).toLocaleString('zh-CN')}
+                {formatDateTime(version.created_at)}
               </Typography.Text>
             ),
             children: (
@@ -171,13 +207,13 @@ export default function FileHistory() {
                 <Space direction="vertical" size={6} style={{ width: '100%' }}>
                   <Space wrap>
                     <Tag color={version.is_current ? 'green' : 'blue'}>v{version.version_no}</Tag>
-                    {version.is_current && <Tag color="green">当前版本</Tag>}
+                    {version.is_current && <Tag color="green">{text.currentVersion}</Tag>}
                     <Typography.Text strong>{version.author_username}</Typography.Text>
                     <Typography.Text type="secondary">{prettySize(version.size_bytes)}</Typography.Text>
                   </Space>
                   <Typography.Paragraph style={{ margin: 0 }}>
                     {version.commit_message || (
-                      <span style={{ color: '#999' }}>没有提交说明</span>
+                      <span style={{ color: 'var(--ln-text-quaternary)' }}>{text.noCommitMessage}</span>
                     )}
                   </Typography.Paragraph>
                   <Typography.Text type="secondary" style={{ fontSize: 11, fontFamily: 'monospace' }}>
@@ -186,28 +222,28 @@ export default function FileHistory() {
                   <Space wrap>
                     {isPreviewable(file.name) && (
                       <Button size="small" type="link" onClick={() => setPreviewing(version)}>
-                        预览
+                        {text.preview}
                       </Button>
                     )}
                     <Button size="small" className="apple-outline-button" onClick={() => void download(version)}>
-                      下载
+                      {text.download}
                     </Button>
                     <Button
                       size="small"
                       className="apple-outline-button"
                       onClick={() => setCommentVersion(version)}
                     >
-                      评论
+                      {text.comments}
                     </Button>
                     {editable && !version.is_current && (
                       <Popconfirm
-                        title={`回滚到 v${version.version_no}？当前版本指针会移动到这里，历史版本仍会保留。`}
+                        title={text.rollbackConfirm(version.version_no)}
                         onConfirm={() => void rollback(version.id)}
-                        okText="回滚"
-                        cancelText="取消"
+                        okText={text.rollback}
+                        cancelText={isZh ? '取消' : 'Cancel'}
                       >
                         <Button size="small" className="apple-pill-button" type="primary">
-                          回滚到此版本
+                          {text.rollbackTo}
                         </Button>
                       </Popconfirm>
                     )}
@@ -237,7 +273,7 @@ export default function FileHistory() {
           fid={fidNum}
           versionId={commentVersion.id}
           open={!!commentVersion}
-          title={`版本评论 · v${commentVersion.version_no}`}
+          title={text.commentsTitle(commentVersion.version_no)}
           currentUser={user}
           onClose={closeVersionComments}
           highlightCommentId={targetCommentId || undefined}

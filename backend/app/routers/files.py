@@ -4,8 +4,14 @@ from sqlalchemy.orm import Session
 
 import hashlib
 import httpx
+import os
+from pathlib import Path
+import shutil
+import subprocess
 
+from ..config import settings
 from ..deps import get_db, require_project_role
+from ..notification_events import create_file_download_notifications
 from ..models import File as FileModel
 from ..models import FileVersion, Project, User
 from ..preview import extract_solidworks_thumbnail, list_ole_streams
@@ -18,6 +24,40 @@ router = APIRouter(prefix="/api/projects/{pid}/files", tags=["files"])
 JLC_VIEWER_API = "https://api.forface3d.com/forface/model/viewer/browser/v1/uploadModel"
 JLC_VIEWER_URL = "https://3d-viewer.jlc.com/viewer"
 JLC_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+
+def _display_name(raw: str) -> str:
+    return raw.replace("\\", "/").split("/")[-1] or raw
+
+
+def _resolve_edrawings_exe_path(user: User) -> Path:
+    if os.name != "nt":
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "eDrawings launch is only available on Windows",
+        )
+    configured = (user.edrawings_exe_path or "").strip()
+    exe_path = Path(configured) if configured else Path(settings.edrawings_exe_path)
+    if not exe_path.is_file():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            f"eDrawings executable not found: {exe_path}",
+        )
+    return exe_path
+
+
+def _prepare_edrawings_file(pid: int, fid: int, version_no: int, filename: str, source: Path) -> Path:
+    safe_name = _display_name(filename)
+    target = (
+        Path(settings.edrawings_cache_dir)
+        / f"project-{pid}"
+        / f"file-{fid}"
+        / f"v{version_no}-{safe_name}"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists() or target.stat().st_size != source.stat().st_size:
+        shutil.copyfile(source, target)
+    return target
 
 
 def _file_out(f: FileModel, db: Session) -> FileOut:
@@ -274,7 +314,7 @@ def download_version(
     ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
     db: Session = Depends(get_db),
 ) -> FileResponse:
-    p, _, _ = ctx
+    p, user, _ = ctx
     f = db.get(FileModel, fid)
     if not f or f.project_id != p.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
@@ -285,6 +325,8 @@ def download_version(
         path = get_blob_path(v.blob_hash)
     except FileNotFoundError:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+    create_file_download_notifications(db, p, f, v, user)
+    db.commit()
     return FileResponse(
         path,
         filename=f"{f.name}.v{v.version_no}",
@@ -313,7 +355,7 @@ def create_jlc_preview(
     except FileNotFoundError:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
 
-    filename = f.name.replace("\\", "/").split("/")[-1] or f.name
+    filename = _display_name(f.name)
     try:
         with path.open("rb") as file_obj:
             response = httpx.post(
@@ -341,6 +383,52 @@ def create_jlc_preview(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "嘉立创在线预览未返回模型地址")
 
     return {"url": f"{JLC_VIEWER_URL}?modelId={model_id}&tokenKey={token_key}"}
+
+
+@router.post("/{fid}/versions/{vid}/edrawings-open")
+def open_in_edrawings(
+    fid: int,
+    vid: int,
+    ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    p, user, _ = ctx
+    f = db.get(FileModel, fid)
+    if not f or f.project_id != p.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    v = db.get(FileVersion, vid)
+    if not v or v.file_id != fid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
+
+    exe_path = _resolve_edrawings_exe_path(user)
+
+    try:
+        blob_path = get_blob_path(v.blob_hash)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+
+    launch_path = _prepare_edrawings_file(p.id, fid, v.version_no, f.name, blob_path)
+
+    try:
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            )
+        subprocess.Popen(
+            [str(exe_path), str(launch_path)],
+            cwd=str(launch_path.parent),
+            close_fds=True,
+            creationflags=creationflags,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"failed to launch eDrawings: {exc}",
+        )
+
+    return {"status": "launched", "filename": _display_name(f.name)}
 
 
 @router.get("/{fid}/versions/{vid}/thumbnail")

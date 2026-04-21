@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Spin } from 'antd';
+import { useAuth } from '../../auth';
+import { useI18n } from '../../i18n';
 import type { PreviewProps } from './index';
 
-// Vite handles the .wasm as a URL asset so the loader can fetch it at runtime
 import wasmUrl from 'occt-import-js/dist/occt-import-js.wasm?url';
 
-// occt-import-js mesh shape
 interface OcctMesh {
   name?: string;
   color?: [number, number, number];
@@ -15,6 +15,7 @@ interface OcctMesh {
   };
   index?: { array: number[] | Uint32Array };
 }
+
 interface OcctResult {
   success: boolean;
   meshes: OcctMesh[];
@@ -23,10 +24,34 @@ interface OcctResult {
 const COLORS = [0x4a90e2, 0xe27d60, 0x7d8c54, 0xb86bff, 0xf4a261, 0x2a9d8f];
 
 export default function StepPreview({ blob }: PreviewProps) {
+  const { user } = useAuth();
+  const { isZh, formatNumber } = useI18n();
   const mountRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState('');
+
+  const text = isZh
+    ? {
+        parseFailed: 'STEP 解析失败：occt 返回 success=false',
+        noMeshFound: 'STEP 文件中未找到可渲染的几何体',
+        infoLabel: (meshCount: number, totalTri: number) =>
+          `${formatNumber(meshCount)} 个零件 · ${formatNumber(Math.round(totalTri))} 三角面`,
+        loadingEngine: '加载 STEP 引擎并解析模型...',
+        loadingHint: '首次加载需要下载约 6 MB WASM 模块',
+        loadFailed: 'STEP 加载失败',
+        interactionHint: '鼠标拖拽旋转，滚轮缩放',
+      }
+    : {
+        parseFailed: 'STEP parsing failed: occt returned success=false',
+        noMeshFound: 'No renderable geometry found in the STEP file',
+        infoLabel: (meshCount: number, totalTri: number) =>
+          `${formatNumber(meshCount)} parts · ${formatNumber(Math.round(totalTri))} triangles`,
+        loadingEngine: 'Loading STEP engine and parsing model...',
+        loadingHint: 'The first load downloads about 6 MB of WASM data',
+        loadFailed: 'STEP Load Failed',
+        interactionHint: 'Drag to rotate, scroll to zoom',
+      };
 
   useEffect(() => {
     let cancelled = false;
@@ -49,15 +74,15 @@ export default function StepPreview({ blob }: PreviewProps) {
 
         const buf = new Uint8Array(await blob.arrayBuffer());
         const result = occt.ReadStepFile(buf, null);
-        if (!result.success) throw new Error('STEP 解析失败：occt 返回 success=false');
-        if (!result.meshes || result.meshes.length === 0)
-          throw new Error('STEP 文件中未找到可渲染的几何体');
+        if (!result.success) throw new Error(text.parseFailed);
+        if (!result.meshes || result.meshes.length === 0) throw new Error(text.noMeshFound);
 
         const width = container.clientWidth;
         const height = Math.max(container.clientHeight, 500);
+        const isDark = user?.ui_theme === 'dark';
 
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xf0f2f5);
+        scene.background = new THREE.Color(isDark ? 0x0f141b : 0xf0f2f5);
         const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 100000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -65,11 +90,11 @@ export default function StepPreview({ blob }: PreviewProps) {
         container.innerHTML = '';
         container.appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-        const dir1 = new THREE.DirectionalLight(0xffffff, 0.8);
+        scene.add(new THREE.AmbientLight(0xffffff, isDark ? 0.8 : 0.6));
+        const dir1 = new THREE.DirectionalLight(0xffffff, isDark ? 1 : 0.8);
         dir1.position.set(1, 1, 1);
         scene.add(dir1);
-        const dir2 = new THREE.DirectionalLight(0xffffff, 0.4);
+        const dir2 = new THREE.DirectionalLight(0xffffff, isDark ? 0.55 : 0.4);
         dir2.position.set(-1, -1, -1);
         scene.add(dir2);
 
@@ -99,15 +124,13 @@ export default function StepPreview({ blob }: PreviewProps) {
             : COLORS[i % COLORS.length];
           const mat = new THREE.MeshPhongMaterial({
             color: colorHex,
-            specular: 0x222222,
+            specular: isDark ? 0x444444 : 0x222222,
             shininess: 40,
             side: THREE.DoubleSide,
           });
           const mesh = new THREE.Mesh(geom, mat);
           group.add(mesh);
-          const triCount = m.index
-            ? m.index.array.length / 3
-            : positions.length / 9;
+          const triCount = m.index ? m.index.array.length / 3 : positions.length / 9;
           totalTri += triCount;
         });
 
@@ -123,7 +146,12 @@ export default function StepPreview({ blob }: PreviewProps) {
 
         const axis = new THREE.AxesHelper(size * 0.5);
         scene.add(axis);
-        const grid = new THREE.GridHelper(size * 2, 20, 0x999999, 0xdddddd);
+        const grid = new THREE.GridHelper(
+          size * 2,
+          20,
+          isDark ? 0x5d6b7d : 0x999999,
+          isDark ? 0x324051 : 0xdddddd,
+        );
         grid.position.y = -size / 2;
         scene.add(grid);
 
@@ -154,13 +182,14 @@ export default function StepPreview({ blob }: PreviewProps) {
           controls.dispose();
           renderer.dispose();
           scene.traverse((obj) => {
-            const m = obj as InstanceType<typeof THREE.Mesh>;
-            if ((m as { isMesh?: boolean }).isMesh) {
-              m.geometry?.dispose();
-              const mat = m.material as
-                | InstanceType<typeof THREE.Material>
-                | Array<InstanceType<typeof THREE.Material>>;
-              if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+            const mesh = obj as InstanceType<typeof THREE.Mesh>;
+            if ((mesh as { isMesh?: boolean }).isMesh) {
+              mesh.geometry?.dispose();
+              const mat =
+                mesh.material as
+                  | InstanceType<typeof THREE.Material>
+                  | Array<InstanceType<typeof THREE.Material>>;
+              if (Array.isArray(mat)) mat.forEach((item) => item.dispose());
               else mat?.dispose();
             }
           });
@@ -169,7 +198,7 @@ export default function StepPreview({ blob }: PreviewProps) {
           }
         };
 
-        setInfo(`${result.meshes.length} 个零件 · ${Math.round(totalTri).toLocaleString()} 三角面`);
+        setInfo(`${text.infoLabel(result.meshes.length, totalTri)} · ${text.interactionHint}`);
         setLoading(false);
       } catch (e) {
         if (!cancelled) {
@@ -184,15 +213,15 @@ export default function StepPreview({ blob }: PreviewProps) {
       cancelled = true;
       if (cleanup) cleanup();
     };
-  }, [blob]);
+  }, [blob, formatNumber, isZh, user?.ui_theme]);
 
   return (
-    <div style={{ position: 'relative', background: '#f0f2f5' }}>
+    <div style={{ position: 'relative', background: 'var(--ln-panel)' }}>
       {loading && (
         <div style={{ padding: 80, textAlign: 'center' }}>
-          <Spin tip="加载 STEP 引擎并解析模型..." size="large" />
-          <div style={{ marginTop: 16, color: '#888', fontSize: 12 }}>
-            首次加载需下载约 6 MB WASM 模块
+          <Spin tip={text.loadingEngine} size="large" />
+          <div style={{ marginTop: 16, color: 'var(--ln-preview-note)', fontSize: 12 }}>
+            {text.loadingHint}
           </div>
         </div>
       )}
@@ -200,7 +229,7 @@ export default function StepPreview({ blob }: PreviewProps) {
         <Alert
           type="error"
           showIcon
-          message="STEP 加载失败"
+          message={text.loadFailed}
           description={error}
           style={{ margin: 24 }}
         />
@@ -213,14 +242,14 @@ export default function StepPreview({ blob }: PreviewProps) {
             left: 12,
             bottom: 12,
             padding: '4px 8px',
-            background: 'rgba(0,0,0,0.5)',
+            background: 'var(--ln-preview-chip)',
             color: '#fff',
             borderRadius: 4,
             fontSize: 12,
             pointerEvents: 'none',
           }}
         >
-          {info} · 鼠标拖拽旋转，滚轮缩放
+          {info}
         </div>
       )}
     </div>
