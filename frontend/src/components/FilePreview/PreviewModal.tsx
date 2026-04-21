@@ -62,7 +62,7 @@ export default function PreviewModal({
     setLoading(true);
     setError(null);
 
-    fetch(`/api/projects/${pid}/files/${fid}/versions/${vid}/download?preview=1`, {
+    fetch(`/api/projects/${pid}/files/${fid}/versions/${vid}/download`, {
       headers: { Authorization: `Bearer ${getToken()}` },
       signal: controller.signal,
     })
@@ -80,6 +80,14 @@ export default function PreviewModal({
   }, [open, pid, fid, vid, needsBlob]);
 
   const triggerDownload = async () => {
+    if (blob) {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = versionNo ? `${filename}.v${versionNo}` : filename;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      return;
+    }
     if (!vid) return;
     try {
       const response = await fetch(
