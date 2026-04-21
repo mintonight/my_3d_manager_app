@@ -1,14 +1,18 @@
 from collections.abc import Iterator
+from datetime import datetime
+import io
+import json
 from pathlib import Path
 import queue
 import threading
 import zipfile
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from ..config import BLOB_DIR
 from ..deps import (
     get_current_user,
     get_db,
@@ -16,6 +20,7 @@ from ..deps import (
     get_project_or_404,
     require_project_role,
 )
+from ..models import Comment, CommentMention, Notification
 from ..models import File as FileModel
 from ..models import FileVersion, Project, ProjectMember, User
 from ..schemas import (
@@ -74,6 +79,264 @@ def _safe_zip_name(name: str) -> str:
     return cleaned or "未命名项目"
 
 
+def _dt(value: datetime) -> str:
+    return value.isoformat()
+
+
+def _parse_dt(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _full_backup_payload(db: Session) -> dict:
+    return {
+        "format": "zgg-full-backup-v1",
+        "created_at": datetime.utcnow().isoformat(),
+        "users": [
+            {
+                "id": row.id,
+                "username": row.username,
+                "email": row.email,
+                "password_hash": row.password_hash,
+                "is_admin": row.is_admin,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(User).order_by(User.id.asc()).all()
+        ],
+        "projects": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "description": row.description,
+                "owner_id": row.owner_id,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(Project).order_by(Project.id.asc()).all()
+        ],
+        "project_members": [
+            {"project_id": row.project_id, "user_id": row.user_id, "role": row.role}
+            for row in db.query(ProjectMember)
+            .order_by(ProjectMember.project_id.asc(), ProjectMember.user_id.asc())
+            .all()
+        ],
+        "files": [
+            {
+                "id": row.id,
+                "project_id": row.project_id,
+                "name": row.name,
+                "current_version_id": row.current_version_id,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(FileModel).order_by(FileModel.id.asc()).all()
+        ],
+        "file_versions": [
+            {
+                "id": row.id,
+                "file_id": row.file_id,
+                "version_no": row.version_no,
+                "blob_hash": row.blob_hash,
+                "size_bytes": row.size_bytes,
+                "commit_message": row.commit_message,
+                "author_id": row.author_id,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(FileVersion).order_by(FileVersion.id.asc()).all()
+        ],
+        "comments": [
+            {
+                "id": row.id,
+                "project_id": row.project_id,
+                "file_id": row.file_id,
+                "file_version_id": row.file_version_id,
+                "author_id": row.author_id,
+                "content": row.content,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(Comment).order_by(Comment.id.asc()).all()
+        ],
+        "comment_mentions": [
+            {
+                "id": row.id,
+                "comment_id": row.comment_id,
+                "mentioned_user_id": row.mentioned_user_id,
+            }
+            for row in db.query(CommentMention).order_by(CommentMention.id.asc()).all()
+        ],
+        "notifications": [
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "comment_id": row.comment_id,
+                "type": row.type,
+                "is_read": row.is_read,
+                "created_at": _dt(row.created_at),
+            }
+            for row in db.query(Notification).order_by(Notification.id.asc()).all()
+        ],
+    }
+
+
+def _stream_full_backup(payload: dict) -> Iterator[bytes]:
+    chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=32)
+
+    def produce() -> None:
+        try:
+            with zipfile.ZipFile(_QueueWriter(chunks), "w", zipfile.ZIP_STORED) as zf:
+                zf.writestr(
+                    "backup.json",
+                    json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                )
+                for blob_hash in sorted(
+                    {row["blob_hash"] for row in payload["file_versions"]}
+                ):
+                    try:
+                        zf.write(get_blob_path(blob_hash), arcname=f"blobs/{blob_hash}")
+                    except FileNotFoundError:
+                        continue
+        except BaseException as exc:
+            chunks.put(exc)
+        finally:
+            chunks.put(None)
+
+    thread = threading.Thread(target=produce, daemon=True)
+    thread.start()
+
+    while True:
+        chunk = chunks.get()
+        if chunk is None:
+            break
+        if isinstance(chunk, BaseException):
+            raise chunk
+        yield chunk
+
+
+def _write_restored_blob(blob_hash: str, content: bytes) -> None:
+    target = BLOB_DIR / blob_hash[:2] / blob_hash[2:]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+
+
+def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -> None:
+    if payload.get("format") != "zgg-full-backup-v1":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "invalid backup format")
+
+    blob_hashes = {row["blob_hash"] for row in payload.get("file_versions", [])}
+    missing = [blob_hash for blob_hash in blob_hashes if f"blobs/{blob_hash}" not in archive.namelist()]
+    if missing:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"backup missing blobs: {missing[:5]}")
+
+    db.query(FileModel).update({FileModel.current_version_id: None})
+    db.query(Notification).delete(synchronize_session=False)
+    db.query(CommentMention).delete(synchronize_session=False)
+    db.query(Comment).delete(synchronize_session=False)
+    db.query(ProjectMember).delete(synchronize_session=False)
+    db.query(FileVersion).delete(synchronize_session=False)
+    db.query(FileModel).delete(synchronize_session=False)
+    db.query(Project).delete(synchronize_session=False)
+    db.query(User).delete(synchronize_session=False)
+    db.flush()
+
+    for row in payload.get("users", []):
+        db.add(
+            User(
+                id=row["id"],
+                username=row["username"],
+                email=row["email"],
+                password_hash=row["password_hash"],
+                is_admin=row["is_admin"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("projects", []):
+        db.add(
+            Project(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                owner_id=row["owner_id"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("project_members", []):
+        db.add(ProjectMember(project_id=row["project_id"], user_id=row["user_id"], role=row["role"]))
+    db.flush()
+
+    for row in payload.get("files", []):
+        db.add(
+            FileModel(
+                id=row["id"],
+                project_id=row["project_id"],
+                name=row["name"],
+                current_version_id=None,
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("file_versions", []):
+        db.add(
+            FileVersion(
+                id=row["id"],
+                file_id=row["file_id"],
+                version_no=row["version_no"],
+                blob_hash=row["blob_hash"],
+                size_bytes=row["size_bytes"],
+                commit_message=row["commit_message"],
+                author_id=row["author_id"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("files", []):
+        file = db.get(FileModel, row["id"])
+        if file:
+            file.current_version_id = row["current_version_id"]
+    db.flush()
+
+    for row in payload.get("comments", []):
+        db.add(
+            Comment(
+                id=row["id"],
+                project_id=row["project_id"],
+                file_id=row["file_id"],
+                file_version_id=row["file_version_id"],
+                author_id=row["author_id"],
+                content=row["content"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+    db.flush()
+
+    for row in payload.get("comment_mentions", []):
+        db.add(
+            CommentMention(
+                id=row["id"],
+                comment_id=row["comment_id"],
+                mentioned_user_id=row["mentioned_user_id"],
+            )
+        )
+    db.flush()
+
+    for row in payload.get("notifications", []):
+        db.add(
+            Notification(
+                id=row["id"],
+                user_id=row["user_id"],
+                comment_id=row["comment_id"],
+                type=row["type"],
+                is_read=row["is_read"],
+                created_at=_parse_dt(row["created_at"]),
+            )
+        )
+
+    for blob_hash in blob_hashes:
+        _write_restored_blob(blob_hash, archive.read(f"blobs/{blob_hash}"))
+
+
 def _project_out(p: Project, role: str) -> ProjectOut:
     return ProjectOut(
         id=p.id,
@@ -105,7 +368,7 @@ def list_my_projects(
 
 
 @router.get("/backup/all")
-def download_all_projects_backup(
+def download_all_projects_archive(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
@@ -133,14 +396,58 @@ def download_all_projects_backup(
                 continue
             entries.append((f"{project_dir}/{file.name}", blob_path))
 
-    encoded = quote("数据备份.zip")
+    encoded = quote("项目备份.zip")
     return StreamingResponse(
         _stream_zip(entries),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=project_backup.zip; filename*=UTF-8''{encoded}"
+        },
+    )
+
+
+@router.get("/backup/data/export")
+def export_data_backup(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    if not user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+
+    payload = _full_backup_payload(db)
+    encoded = quote("数据备份.zip")
+    return StreamingResponse(
+        _stream_full_backup(payload),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename=data_backup.zip; filename*=UTF-8''{encoded}"
         },
     )
+
+
+@router.post("/backup/data/import")
+async def import_data_backup(
+    upload: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    if not user.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "admin only")
+
+    try:
+        content = await upload.read()
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            payload = json.loads(archive.read("backup.json").decode("utf-8"))
+            _restore_full_backup(db, payload, archive)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"restore failed: {exc}")
+
+    return {"status": "ok"}
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)

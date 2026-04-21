@@ -3,6 +3,7 @@ from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 import hashlib
+import httpx
 
 from ..deps import get_db, require_project_role
 from ..models import File as FileModel
@@ -13,6 +14,10 @@ from ..storage import get_blob_path, save_blob
 
 
 router = APIRouter(prefix="/api/projects/{pid}/files", tags=["files"])
+
+JLC_VIEWER_API = "https://api.forface3d.com/forface/model/viewer/browser/v1/uploadModel"
+JLC_VIEWER_URL = "https://3d-viewer.jlc.com/viewer"
+JLC_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 def _file_out(f: FileModel, db: Session) -> FileOut:
@@ -285,6 +290,57 @@ def download_version(
         filename=f"{f.name}.v{v.version_no}",
         media_type="application/octet-stream",
     )
+
+
+@router.post("/{fid}/versions/{vid}/jlc-preview")
+def create_jlc_preview(
+    fid: int,
+    vid: int,
+    ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    p, _, _ = ctx
+    f = db.get(FileModel, fid)
+    if not f or f.project_id != p.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    v = db.get(FileVersion, vid)
+    if not v or v.file_id != fid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
+    if v.size_bytes > JLC_MAX_UPLOAD_BYTES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "嘉立创在线预览仅支持不超过 100MB 的文件")
+    try:
+        path = get_blob_path(v.blob_hash)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+
+    filename = f.name.replace("\\", "/").split("/")[-1] or f.name
+    try:
+        with path.open("rb") as file_obj:
+            response = httpx.post(
+                JLC_VIEWER_API,
+                headers={"System-Sources-Side": "Web", "token": ""},
+                files={"file": (filename, file_obj, "application/octet-stream")},
+                timeout=120,
+            )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"嘉立创在线预览上传失败: {exc}",
+        )
+
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict) or not payload.get("success"):
+        detail = payload.get("msg") if isinstance(payload, dict) else "unknown response"
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"嘉立创在线预览上传失败: {detail}")
+
+    model_id = data.get("modelId")
+    token_key = data.get("tokenKey")
+    if not model_id or not token_key:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "嘉立创在线预览未返回模型地址")
+
+    return {"url": f"{JLC_VIEWER_URL}?modelId={model_id}&tokenKey={token_key}"}
 
 
 @router.get("/{fid}/versions/{vid}/thumbnail")

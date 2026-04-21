@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Spin, Typography } from 'antd';
+import { Alert, Button, Spin, Typography, message } from 'antd';
 import { getToken } from '../../api';
 
 interface Props {
@@ -12,6 +12,7 @@ interface Props {
 export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [externalLoading, setExternalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -58,6 +59,39 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
     };
   }, [url]);
 
+  const openJlcPreview = async () => {
+    const previewWindow = window.open('about:blank', '_blank');
+    setExternalLoading(true);
+    try {
+      const response = await fetch(`/api/projects/${pid}/files/${fid}/versions/${vid}/jlc-preview`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const body = await response.json();
+          if (body?.detail) detail = String(body.detail);
+        } catch {
+          // ignore
+        }
+        throw new Error(detail);
+      }
+      const body = (await response.json()) as { url?: string };
+      if (!body.url) throw new Error('嘉立创未返回预览地址');
+      if (previewWindow) {
+        previewWindow.location.href = body.url;
+      } else {
+        window.open(body.url, '_blank');
+      }
+    } catch (e) {
+      previewWindow?.close();
+      message.error((e as Error).message || String(e));
+    } finally {
+      setExternalLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ padding: 80, textAlign: 'center' }}>
@@ -81,6 +115,14 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
                 SolidWorks 文件通常会在保存时写入 PNG 预览；若保存时关闭了"保存缩略图"选项，或文件为极简模式，则无法提取。可下载文件后用 SolidWorks 打开，或另存为 STEP/STL 用于在线预览。
               </Typography.Paragraph>
+              <Button
+                className="apple-pill-button"
+                type="primary"
+                loading={externalLoading}
+                onClick={() => void openJlcPreview()}
+              >
+                使用嘉立创在线预览
+              </Button>
             </div>
           }
         />
@@ -103,6 +145,13 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         此预览来自 SolidWorks 文件内嵌的缩略图
       </Typography.Text>
+      <Button
+        className="apple-pill-button apple-outline-button"
+        loading={externalLoading}
+        onClick={() => void openJlcPreview()}
+      >
+        使用嘉立创在线预览
+      </Button>
       {url && (
         <img
           src={url}

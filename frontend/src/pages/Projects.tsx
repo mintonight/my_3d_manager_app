@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -47,8 +47,11 @@ export default function Projects() {
   const { user } = useAuth();
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [backupLoading, setBackupLoading] = useState(false);
+  const [projectBackupLoading, setProjectBackupLoading] = useState(false);
+  const [dataExportLoading, setDataExportLoading] = useState(false);
+  const [dataImportLoading, setDataImportLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
   const [form] = Form.useForm();
 
   const load = async () => {
@@ -79,19 +82,65 @@ export default function Projects() {
     }
   };
 
-  const downloadBackup = async () => {
-    setBackupLoading(true);
+  const downloadProjectBackup = async () => {
+    setProjectBackupLoading(true);
     try {
       const response = await fetch('/api/projects/backup/all', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
-      if (!response.ok) throw new Error(`备份失败: ${response.status}`);
+      if (!response.ok) throw new Error(`项目备份失败: ${response.status}`);
+      saveBlob(await response.blob(), '项目备份.zip');
+      message.success('项目备份已开始下载');
+    } catch (error) {
+      message.error(String(error));
+    } finally {
+      setProjectBackupLoading(false);
+    }
+  };
+
+  const exportDataBackup = async () => {
+    setDataExportLoading(true);
+    try {
+      const response = await fetch('/api/projects/backup/data/export', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!response.ok) throw new Error(`数据导出失败: ${response.status}`);
       saveBlob(await response.blob(), '数据备份.zip');
       message.success('数据备份已开始下载');
     } catch (error) {
       message.error(String(error));
     } finally {
-      setBackupLoading(false);
+      setDataExportLoading(false);
+    }
+  };
+
+  const restoreDataBackup = async (file: File) => {
+    setDataImportLoading(true);
+    try {
+      const body = new FormData();
+      body.append('upload', file);
+      const response = await fetch('/api/projects/backup/data/import', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body,
+      });
+      if (!response.ok) {
+        let detail = `数据恢复失败: ${response.status}`;
+        try {
+          const payload = await response.json();
+          if (payload?.detail) detail = String(payload.detail);
+        } catch {
+          // ignore
+        }
+        throw new Error(detail);
+      }
+      message.success('数据恢复完成');
+      await load();
+    } catch (error) {
+      message.error(String(error));
+    } finally {
+      setDataImportLoading(false);
+      if (restoreInputRef.current) restoreInputRef.current.value = '';
     }
   };
 
@@ -114,13 +163,47 @@ export default function Projects() {
           </div>
           <Space wrap>
             {user?.is_admin && (
-              <Button
-                className="apple-pill-button apple-outline-button"
-                onClick={() => void downloadBackup()}
-                loading={backupLoading}
-              >
-                数据备份
-              </Button>
+              <>
+                <Button
+                  className="apple-pill-button apple-outline-button"
+                  onClick={() => void downloadProjectBackup()}
+                  loading={projectBackupLoading}
+                >
+                  项目备份
+                </Button>
+                <Button
+                  className="apple-pill-button apple-outline-button"
+                  onClick={() => void exportDataBackup()}
+                  loading={dataExportLoading}
+                >
+                  数据导出
+                </Button>
+                <Button
+                  className="apple-pill-button apple-outline-button"
+                  onClick={() => restoreInputRef.current?.click()}
+                  loading={dataImportLoading}
+                >
+                  数据恢复
+                </Button>
+                <input
+                  ref={restoreInputRef}
+                  type="file"
+                  accept=".zip,application/zip"
+                  style={{ display: 'none' }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    Modal.confirm({
+                      title: '确定恢复数据备份？',
+                      content: '恢复会覆盖当前项目、文件版本、成员、用户和评论通知数据。',
+                      okText: '恢复',
+                      cancelText: '取消',
+                      okButtonProps: { danger: true },
+                      onOk: () => restoreDataBackup(file),
+                    });
+                  }}
+                />
+              </>
             )}
             <Button className="apple-pill-button" type="primary" onClick={() => setOpen(true)}>
               新建项目

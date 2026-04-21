@@ -11,6 +11,12 @@
 - **项目整包下载**：一键把项目所有文件的当前版本打包成 ZIP，目录结构保留
 - **内容寻址存储**：二进制内容按 SHA256 存放，自动去重；版本不可变
 
+### 备份与恢复
+
+- **项目备份**：超级管理员可把所有项目的当前文件按项目名分文件夹打包为 `项目备份.zip`
+- **数据导出**：超级管理员可导出完整 `数据备份.zip`，包含用户、成员、项目、文件、版本记录、评论、通知和全部版本 blob
+- **数据恢复**：超级管理员可上传 `数据备份.zip` 恢复系统数据；恢复会覆盖当前数据库记录和 blob 文件
+
 ### 浏览与搜索
 
 - **文件列表排序**（类 Windows 资源管理器）：点击列头切换升/降序
@@ -22,7 +28,7 @@
 
 ### 在线预览
 
-全部在浏览器内完成，不经第三方服务：
+默认预览在浏览器内完成；SolidWorks 原生文件额外提供可选的嘉立创外部在线预览：
 
 - **通用预览引擎**：接入 [jit-viewer](https://github.com/jitOffice/jit-viewer-sdk)
   - **办公文档**：PDF、Word（.docx）、Excel（.xlsx/.xls）、PowerPoint（.pptx/.ppt）、OFD、CSV
@@ -33,14 +39,15 @@
   - **2D CAD**：DXF
 - **STEP / STP**：由 [occt-import-js](https://github.com/kovacsv/occt-import-js)（OCCT 编译到 WebAssembly）+ three.js 处理
 - **SolidWorks 缩略图提取**：对 `.sldprt` / `.sldasm` / `.slddrw`，后端用 `olefile` + `Pillow` 遍历 OLE Compound File 流，提取嵌入的 PNG / JPEG / DIB 预览图返回给浏览器
+- **嘉立创外部预览**：对 SolidWorks 文件可点击「使用嘉立创在线预览」，后端代理上传当前版本原文件到嘉立创 3D Viewer，并在新窗口打开其在线预览页；嘉立创接口限制文件不超过 100MB
 - 预览器按需懒加载，不预览就不下载对应 JS/WASM
 
 ### 协作
 
 - **项目成员与角色**：owner / editor / viewer，细粒度权限
-- **评论系统**：文件级与版本级评论，支持 `@用户名` 提醒当前项目成员
+- **评论系统**：文件级与版本级评论；`@提醒成员` 与评论正文分离，使用当前项目成员下拉多选
 - **通知中心**：被 @ 的用户收到通知铃提醒；点击跳转到对应评论并自动标记已读
-- **管理员视角**：管理员可见并管理所有项目
+- **管理员视角**：管理员可见并管理所有项目，并拥有项目备份、完整数据导出和数据恢复能力
 
 ### 界面
 
@@ -50,9 +57,9 @@
 ## 目录结构
 
 ```
-zhihu_article/
+my_3d_manager_app/
 ├── article.md                 # 原始产品文档（参考）
-├── DESIGN-linear.app.md       # 当前采用的亮色主题设计说明
+├── DESIGN.md                  # 当前采用的亮色主题设计说明
 ├── backend/                   # FastAPI + SQLAlchemy + SQLite（uv 管理）
 │   ├── app/
 │   │   ├── main.py
@@ -79,7 +86,7 @@ zhihu_article/
         │       ├── utils.ts               # 格式识别
         │       ├── JitViewerPreview.tsx   # jit-viewer 通用预览
         │       ├── StepPreview.tsx        # STEP/STP 专用
-        │       ├── SolidWorksPreview.tsx  # 拉取后端缩略图 PNG
+        │       ├── SolidWorksPreview.tsx  # 后端缩略图 + 嘉立创外部预览入口
         │       └── UnsupportedPreview.tsx
         ├── theme.ts                       # Ant Design token 定制
         └── styles.css                     # Linear 风格全局样式
@@ -110,6 +117,12 @@ uv run uvicorn app.main:app --reload     # 启动，默认 :8000
 
 Swagger UI：<http://localhost:8000/docs>
 
+局域网访问时后端应监听所有网卡：
+
+```bash
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
 #### 管理依赖
 
 ```bash
@@ -135,6 +148,12 @@ npm run dev
 ```
 
 访问：<http://localhost:5173>
+
+前端开发服务器已配置 `host: 0.0.0.0`，同一局域网设备可访问：
+
+```text
+http://你的局域网IP:5173
+```
 
 Vite 会把 `/api/*` 请求代理到后端 `http://127.0.0.1:8000`。
 
@@ -214,13 +233,14 @@ npm run preview  # 本地预览构建产物
 5. 回到「文件」tab，点「上传新文件」传一个图纸，commit message 填「首版」
 6. 或点「上传文件夹」一次传入整个目录（会保留 `assembly/parts/gear.step` 这类相对路径）
 7. 在文件列表点列头按文件名 / 版本 / 时间任意排序；在搜索框筛选文件
-8. 对任意文件点「预览」，在浏览器内直接看 PDF / 图片 / STEP 3D / Office 文档
-9. 对某条文件或版本发评论，`@bob` 会触发通知
+8. 对任意文件点「预览」，在浏览器内直接看 PDF / 图片 / STEP 3D / Office 文档；SolidWorks 文件可选择嘉立创外部在线预览
+9. 对某条文件或版本发评论，在「@提醒成员」下拉框选择 `bob` 会触发通知
 10. 退出，改用 `bob` 登录，点右上角通知铃，跳转到对应评论
 11. `bob` 对已有文件「提交新版本」2-3 次，或重新「上传文件夹」
 12. 点击文件名进入「版本历史」页面——完整版本 timeline
 13. 对某个早期版本点「回滚到此版本」，当前版本指针跳回去
 14. 「下载当前版本」= 你回滚到的那个版本的内容
+15. 超级管理员可在项目列表页执行「项目备份」「数据导出」「数据恢复」
 
 ## 权限矩阵
 
@@ -231,6 +251,7 @@ npm run preview  # 本地预览构建产物
 | 管理成员                       |   ✅  |   ❌   |   ❌   |  ✅   |
 | 删除文件 / 删除项目            |   ✅  |   ❌   |   ❌   |  ✅   |
 | 跨项目查看所有项目             |   ❌  |   ❌   |   ❌   |  ✅   |
+| 项目备份 / 数据导出 / 数据恢复 |   ❌  |   ❌   |   ❌   |  ✅   |
 
 ## 存储机制
 
@@ -239,6 +260,13 @@ npm run preview  # 本地预览构建产物
 - **天然去重**：同一份图纸即使被不同项目/文件引用，磁盘上也只存一份
 - **版本不可变**：blob 文件以哈希命名，不会被覆盖——回滚只是改数据库里的「当前版本指针」，老版本永远能找回来
 - **易扩展**：未来换成 S3/MinIO 只需改 `app/storage.py` 一个文件
+
+## 备份机制
+
+- **项目备份**：`GET /api/projects/backup/all`，仅超级管理员可用；导出所有项目当前文件，不包含版本历史和用户数据
+- **数据导出**：`GET /api/projects/backup/data/export`，仅超级管理员可用；生成 `数据备份.zip`
+- **数据恢复**：`POST /api/projects/backup/data/import`，仅超级管理员可用；上传 `数据备份.zip` 后覆盖当前数据
+- **完整数据范围**：用户、项目、项目成员、文件、全部文件版本、评论、@ 提醒、通知记录和所有版本 blob 文件
 
 ## SolidWorks 预览原理
 
@@ -250,11 +278,17 @@ SolidWorks 原生文件（`.sldprt` / `.sldasm` / `.slddrw`）是 Microsoft Comp
 4. 从 `\x05SummaryInformation` property set 读取 thumbnail 字段
 5. 全文件 raw scan 作为兜底
 
-若文件保存时关闭了「保存缩略图」选项，或为极简模式，则无法提取，前端会提示用户另存为 STEP / STL 用于在线预览。
+若文件保存时关闭了「保存缩略图」选项，或为极简模式，则无法提取。此时前端提供「使用嘉立创在线预览」按钮：后端通过 `httpx` 代理上传当前版本原文件到嘉立创 3D Viewer，返回 `modelId/tokenKey` 后在新窗口打开嘉立创预览页。
+
+注意：
+
+- 该外部预览会把文件上传到嘉立创服务，适合作为用户主动选择的可选预览能力
+- 嘉立创在线预览限制单文件不超过 100MB
+- 接入依赖嘉立创网页内部接口，若第三方接口变化，可能需要调整后端代理逻辑
 
 ## 技术栈
 
-- **后端**：Python 3.11+ · FastAPI 0.115 · SQLAlchemy 2.0 · SQLite · JWT (HS256) · bcrypt · olefile · Pillow
+- **后端**：Python 3.11+ · FastAPI 0.115 · SQLAlchemy 2.0 · SQLite · JWT (HS256) · bcrypt · olefile · Pillow · httpx
 - **前端**：React 18 · Vite 5 · TypeScript 5 · React Router 6 · Ant Design 5 · Axios · three.js · occt-import-js · jit-viewer
 - **存储**：本地文件系统 + SHA256 内容寻址
 
