@@ -18,8 +18,6 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    is_sqlite = op.get_context().dialect.name == "sqlite"
-
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
@@ -61,11 +59,6 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("current_version_id", sa.Integer(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
-        *(
-            [sa.ForeignKeyConstraint(["current_version_id"], ["file_versions.id"], name="fk_file_current_version")]
-            if is_sqlite
-            else []
-        ),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"]),
         sa.UniqueConstraint("project_id", "name", name="uq_file_project_name"),
     )
@@ -84,14 +77,13 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["file_id"], ["files.id"]),
         sa.UniqueConstraint("file_id", "version_no", name="uq_fileversion_no"),
     )
-    if not is_sqlite:
-        op.create_foreign_key(
-            "fk_file_current_version",
-            "files",
-            "file_versions",
-            ["current_version_id"],
-            ["id"],
-        )
+    op.create_foreign_key(
+        "fk_file_current_version",
+        "files",
+        "file_versions",
+        ["current_version_id"],
+        ["id"],
+    )
 
     op.create_table(
         "comments",
@@ -177,8 +169,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    is_sqlite = op.get_context().dialect.name == "sqlite"
-
     op.drop_index("ix_download_notifications_actor_id", table_name="download_notifications")
     op.drop_index("ix_download_notifications_file_version_id", table_name="download_notifications")
     op.drop_index("ix_download_notifications_file_id", table_name="download_notifications")
@@ -200,8 +190,7 @@ def downgrade() -> None:
     op.drop_index("ix_comments_project_id", table_name="comments")
     op.drop_table("comments")
 
-    if not is_sqlite:
-        op.drop_constraint("fk_file_current_version", "files", type_="foreignkey")
+    op.drop_constraint("fk_file_current_version", "files", type_="foreignkey")
     op.drop_table("file_versions")
     op.drop_table("files")
     op.drop_table("project_members")

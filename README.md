@@ -96,8 +96,7 @@
 - Python 3.11+
 - FastAPI
 - SQLAlchemy 2
-- SQLite（默认本地开发）
-- PostgreSQL（生产部署）
+- PostgreSQL 18
 - Pydantic v2
 - JWT 鉴权（`python-jose`）
 - 密码哈希（`passlib` / `bcrypt`）
@@ -167,13 +166,22 @@ zhihu_article/
 - uv：Python 包管理器。
 - Node.js 18+。
 
+### 启动 PostgreSQL
+
+```powershell
+pg_ctl -D "$env:USERPROFILE\.zgg-postgres\data" -l "$env:USERPROFILE\.zgg-postgres\postgres.log" -o "-p 55432 -c listen_addresses=127.0.0.1" start
+```
+
+如果提示服务已经运行，可以忽略。
+
 ### 启动后端
 
-本地开发命令没有变化，默认仍使用 SQLite：
+后端现在使用 PostgreSQL，启动前需要新开一个 PowerShell，让用户级环境变量 `ZGG_DATABASE_URL` 生效。
 
 ```bash
 cd backend
 uv sync
+uv run alembic upgrade head
 uv run uvicorn app.main:app --reload
 ```
 
@@ -199,57 +207,6 @@ npm run dev
 
 Vite 会把 `/api/*` 请求代理到 `http://127.0.0.1:8000`。
 
-### PostgreSQL 生产启动
-
-如果部署给多人真实使用，建议切到 PostgreSQL，并用 Alembic 管理表结构：
-
-```bash
-cd backend
-uv sync --frozen --no-dev
-
-# Windows PowerShell
-$env:ZGG_DATABASE_URL = "postgresql+psycopg://user:password@host:5432/dbname"
-$env:ZGG_AUTO_CREATE_TABLES = "false"
-uv run alembic upgrade head
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Linux / macOS：
-
-```bash
-cd backend
-uv sync --frozen --no-dev
-
-export ZGG_DATABASE_URL="postgresql+psycopg://user:password@host:5432/dbname"
-export ZGG_AUTO_CREATE_TABLES=false
-uv run alembic upgrade head
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-说明：
-
-- 本地开发不需要设置这些环境变量。
-- PostgreSQL 生产环境建议设置 `ZGG_AUTO_CREATE_TABLES=false`，表结构统一交给 Alembic。
-- 新建 PostgreSQL 数据库首次部署时，先执行 `uv run alembic upgrade head`，再启动后端。
-- 如果数据库已经被旧版本后端自动建过表，不要直接执行 `upgrade head`；先用 `uv run alembic stamp head` 把现有结构标记为当前迁移基线。
-
-### 已有 SQLite 本地库接入 Alembic
-
-如果你本地已经启动过后端，默认 SQLite 数据库里通常已经有 `users`、`projects` 等表。这个时候执行 `uv run alembic upgrade head` 会报 `table users already exists`。
-
-保留现有数据的处理方式是：
-
-```bash
-cd backend
-uv run alembic stamp head
-```
-
-这条命令只写入 Alembic 版本标记，不会重建业务表，也不会清空数据。后续如果新增迁移，再执行：
-
-```bash
-uv run alembic upgrade head
-```
-
 ### 常用命令
 
 ```bash
@@ -257,8 +214,7 @@ uv run alembic upgrade head
 cd backend
 uv sync
 uv run uvicorn app.main:app --reload
-uv run alembic stamp head    # 仅已有库首次接入 Alembic 时执行
-uv run alembic upgrade head  # 新库初始化或后续结构迁移时执行
+uv run alembic upgrade head
 
 # 前端
 cd frontend
@@ -351,9 +307,16 @@ npm run build
 10. 对 STEP / STP 文件直接浏览器预览；对 SolidWorks 文件选择 eDrawings 或嘉立创在线预览。
 11. 用超级管理员登录，查看所有项目并执行项目备份、数据导出或数据恢复。
 
-## 存储机制
+## 数据库与存储机制
 
-文件内容存放在：
+业务元数据存放在 PostgreSQL。当前本机开发实例：
+
+- 地址：`127.0.0.1:55432`
+- 数据库：`zgg_prod`
+- 用户：`zgg_app`
+- 数据目录：`C:\Users\jackmin\.zgg-postgres\data`
+
+文件内容仍存放在本地 blob 目录：
 
 ```text
 backend/data/blobs/<sha256[:2]>/<sha256[2:]>

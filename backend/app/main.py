@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .bootstrap import ensure_default_admin
-from .database import init_db
 from .routers import auth, comments, files, notifications, projects, search
 
 
@@ -24,7 +23,6 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup() -> None:
-    init_db()
     ensure_default_admin()
 
 

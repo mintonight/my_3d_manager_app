@@ -12,6 +12,7 @@ import subprocess
 from ..config import settings
 from ..deps import get_db, require_project_role
 from ..notification_events import create_file_download_notifications
+from ..models import Comment, CommentMention, DownloadNotification, Notification
 from ..models import File as FileModel
 from ..models import FileVersion, Project, User
 from ..preview import extract_solidworks_thumbnail, list_ole_streams
@@ -501,8 +502,27 @@ def delete_file(
     f = db.get(FileModel, fid)
     if not f or f.project_id != p.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+
+    comment_ids = [
+        row[0]
+        for row in db.query(Comment.id)
+        .filter(Comment.file_id == fid)
+        .all()
+    ]
+    if comment_ids:
+        db.query(Notification).filter(Notification.comment_id.in_(comment_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(CommentMention).filter(CommentMention.comment_id.in_(comment_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(Comment).filter(Comment.file_id == fid).delete(synchronize_session=False)
+    db.query(DownloadNotification).filter(DownloadNotification.file_id == fid).delete(
+        synchronize_session=False
+    )
+
     f.current_version_id = None
     db.flush()
-    db.query(FileVersion).filter(FileVersion.file_id == fid).delete()
+    db.query(FileVersion).filter(FileVersion.file_id == fid).delete(synchronize_session=False)
     db.delete(f)
     db.commit()

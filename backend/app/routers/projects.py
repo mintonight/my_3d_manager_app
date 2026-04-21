@@ -559,6 +559,46 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> None:
     p, _, _ = ctx
+
+    file_ids = [
+        row[0]
+        for row in db.query(FileModel.id)
+        .filter(FileModel.project_id == p.id)
+        .all()
+    ]
+    comment_ids = [
+        row[0]
+        for row in db.query(Comment.id)
+        .filter(Comment.project_id == p.id)
+        .all()
+    ]
+
+    if comment_ids:
+        db.query(Notification).filter(Notification.comment_id.in_(comment_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(CommentMention).filter(CommentMention.comment_id.in_(comment_ids)).delete(
+            synchronize_session=False
+        )
+    db.query(DownloadNotification).filter(DownloadNotification.project_id == p.id).delete(
+        synchronize_session=False
+    )
+    db.query(Comment).filter(Comment.project_id == p.id).delete(synchronize_session=False)
+
+    if file_ids:
+        db.query(FileModel).filter(FileModel.id.in_(file_ids)).update(
+            {FileModel.current_version_id: None},
+            synchronize_session=False,
+        )
+        db.flush()
+        db.query(FileVersion).filter(FileVersion.file_id.in_(file_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(FileModel).filter(FileModel.id.in_(file_ids)).delete(synchronize_session=False)
+
+    db.query(ProjectMember).filter(ProjectMember.project_id == p.id).delete(
+        synchronize_session=False
+    )
     db.delete(p)
     db.commit()
 
