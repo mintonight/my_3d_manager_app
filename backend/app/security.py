@@ -1,0 +1,31 @@
+from datetime import datetime, timedelta
+from typing import Any
+
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+from .config import settings
+
+
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def hash_password(password: str) -> str:
+    return pwd_ctx.hash(password)
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return pwd_ctx.verify(password, hashed)
+
+
+def create_access_token(subject: str | int) -> str:
+    expire = datetime.utcnow() + timedelta(days=settings.jwt_expire_days)
+    payload = {"sub": str(subject), "exp": expire}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_token(token: str) -> dict[str, Any]:
+    try:
+        return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError as e:
+        raise ValueError("invalid token") from e
