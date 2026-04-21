@@ -138,6 +138,73 @@ npm run dev
 
 Vite 会把 `/api/*` 请求代理到后端 `http://127.0.0.1:8000`。
 
+#### 前端环境配置
+
+当前前端是 **React 18 + Vite 5 + TypeScript 5**，使用 **npm** 作为包管理器。
+
+1. 安装 **Node.js 18+**
+2. 打开终端，确认版本：
+
+```bash
+node -v
+npm -v
+```
+
+建议看到：
+
+- `node` 为 `v18`、`v20` 或更高
+- `npm` 可正常输出版本号
+
+3. 进入前端目录并安装依赖：
+
+```bash
+cd frontend
+npm install
+```
+
+4. 启动开发环境：
+
+```bash
+npm run dev
+```
+
+启动后默认访问：<http://localhost:5173>
+
+#### 与后端联调
+
+- 前端接口基地址写死为 `/api`
+- 开发环境代理配置在 `frontend/vite.config.ts`
+- 当前会把 `/api/*` 转发到 `http://127.0.0.1:8000`
+
+所以本地联调时，后端也要同时启动在 `8000` 端口。
+
+如果你想改后端地址，修改：
+
+```ts
+// frontend/vite.config.ts
+proxy: {
+  '/api': 'http://127.0.0.1:8000',
+}
+```
+
+#### 当前前端不需要单独 `.env`
+
+这个项目现在没有使用 `VITE_*` 环境变量，也不依赖前端 `.env` 文件。  
+前端开发环境能否正常跑起来，关键只有两件事：
+
+- Node.js / npm 安装正确
+- 后端服务已启动，且地址与 `vite.config.ts` 里的代理一致
+
+#### 常用命令
+
+```bash
+cd frontend
+npm install      # 安装依赖
+npm run dev      # 启动开发环境
+npm run build    # 生产构建
+npm run preview  # 本地预览构建产物
+```
+
 ## 端到端体验路径
 
 1. 打开 <http://localhost:5173>，注册用户 `alice`
