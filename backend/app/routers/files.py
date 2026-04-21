@@ -312,6 +312,7 @@ def list_versions(
 def download_version(
     fid: int,
     vid: int,
+    preview: bool = False,
     ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
     db: Session = Depends(get_db),
 ) -> FileResponse:
@@ -326,8 +327,9 @@ def download_version(
         path = get_blob_path(v.blob_hash)
     except FileNotFoundError:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
-    create_file_download_notifications(db, p, f, v, user)
-    db.commit()
+    if not preview:
+        create_file_download_notifications(db, p, f, v, user)
+        db.commit()
     return FileResponse(
         path,
         filename=f"{f.name}.v{v.version_no}",
