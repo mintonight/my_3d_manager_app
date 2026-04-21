@@ -96,7 +96,8 @@
 - Python 3.11+
 - FastAPI
 - SQLAlchemy 2
-- SQLite
+- SQLite（默认本地开发）
+- PostgreSQL（生产部署）
 - Pydantic v2
 - JWT 鉴权（`python-jose`）
 - 密码哈希（`passlib` / `bcrypt`）
@@ -168,6 +169,8 @@ zhihu_article/
 
 ### 启动后端
 
+本地开发命令没有变化，默认仍使用 SQLite：
+
 ```bash
 cd backend
 uv sync
@@ -196,6 +199,57 @@ npm run dev
 
 Vite 会把 `/api/*` 请求代理到 `http://127.0.0.1:8000`。
 
+### PostgreSQL 生产启动
+
+如果部署给多人真实使用，建议切到 PostgreSQL，并用 Alembic 管理表结构：
+
+```bash
+cd backend
+uv sync --frozen --no-dev
+
+# Windows PowerShell
+$env:ZGG_DATABASE_URL = "postgresql+psycopg://user:password@host:5432/dbname"
+$env:ZGG_AUTO_CREATE_TABLES = "false"
+uv run alembic upgrade head
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Linux / macOS：
+
+```bash
+cd backend
+uv sync --frozen --no-dev
+
+export ZGG_DATABASE_URL="postgresql+psycopg://user:password@host:5432/dbname"
+export ZGG_AUTO_CREATE_TABLES=false
+uv run alembic upgrade head
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+说明：
+
+- 本地开发不需要设置这些环境变量。
+- PostgreSQL 生产环境建议设置 `ZGG_AUTO_CREATE_TABLES=false`，表结构统一交给 Alembic。
+- 新建 PostgreSQL 数据库首次部署时，先执行 `uv run alembic upgrade head`，再启动后端。
+- 如果数据库已经被旧版本后端自动建过表，不要直接执行 `upgrade head`；先用 `uv run alembic stamp head` 把现有结构标记为当前迁移基线。
+
+### 已有 SQLite 本地库接入 Alembic
+
+如果你本地已经启动过后端，默认 SQLite 数据库里通常已经有 `users`、`projects` 等表。这个时候执行 `uv run alembic upgrade head` 会报 `table users already exists`。
+
+保留现有数据的处理方式是：
+
+```bash
+cd backend
+uv run alembic stamp head
+```
+
+这条命令只写入 Alembic 版本标记，不会重建业务表，也不会清空数据。后续如果新增迁移，再执行：
+
+```bash
+uv run alembic upgrade head
+```
+
 ### 常用命令
 
 ```bash
@@ -203,6 +257,8 @@ Vite 会把 `/api/*` 请求代理到 `http://127.0.0.1:8000`。
 cd backend
 uv sync
 uv run uvicorn app.main:app --reload
+uv run alembic stamp head    # 仅已有库首次接入 Alembic 时执行
+uv run alembic upgrade head  # 新库初始化或后续结构迁移时执行
 
 # 前端
 cd frontend
@@ -327,5 +383,5 @@ SolidWorks 原生文件属于闭源格式，浏览器不能直接稳定渲染。
 
 - 版本间 3D diff。
 - 活动时间线和项目概览仪表盘。
-- PostgreSQL、对象存储和 Docker 部署。
+- 对象存储和 Docker 部署。
 - 更完整的 CAD 闭源格式支持。

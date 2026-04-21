@@ -1,13 +1,16 @@
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Engine, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import settings
 
 
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False} if settings.database_url.startswith("sqlite") else {},
-)
+def _engine_kwargs(database_url: str) -> dict:
+    if database_url.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
+    return {"pool_pre_ping": True}
+
+
+engine = create_engine(settings.database_url, **_engine_kwargs(settings.database_url))
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -16,15 +19,16 @@ class Base(DeclarativeBase):
     pass
 
 
-def _migrate_users_table() -> None:
-    inspector = inspect(engine)
+def _migrate_users_table(target_engine: Engine) -> None:
+    inspector = inspect(target_engine)
     if "users" not in inspector.get_table_names():
         return
     column_names = {column["name"] for column in inspector.get_columns("users")}
-    with engine.begin() as conn:
+    bool_default = "0" if target_engine.dialect.name == "sqlite" else "false"
+    with target_engine.begin() as conn:
         if "is_admin" not in column_names:
             conn.execute(
-                text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+                text(f"ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT {bool_default}")
             )
         if "ui_language" not in column_names:
             conn.execute(
@@ -43,5 +47,6 @@ def _migrate_users_table() -> None:
 def init_db() -> None:
     from . import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    _migrate_users_table()
+    if settings.auto_create_tables:
+        Base.metadata.create_all(bind=engine)
+        _migrate_users_table(engine)

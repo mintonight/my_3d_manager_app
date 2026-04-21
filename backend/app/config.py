@@ -11,6 +11,7 @@ DEFAULT_EDRAWINGS_CACHE_DIR = DATA_DIR / "edrawings"
 
 class Settings(BaseSettings):
     database_url: str = f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
+    auto_create_tables: bool = True
     jwt_secret: str = "change-me-in-production-zhuiguang-geometry-lite"
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 7
