@@ -334,6 +334,31 @@ def download_version(
     )
 
 
+@router.get("/{fid}/versions/{vid}/content")
+def get_version_content(
+    fid: int,
+    vid: int,
+    ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    p, _, _ = ctx
+    f = db.get(FileModel, fid)
+    if not f or f.project_id != p.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    v = db.get(FileVersion, vid)
+    if not v or v.file_id != fid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
+    try:
+        path = get_blob_path(v.blob_hash)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
 @router.post("/{fid}/versions/{vid}/jlc-preview")
 def create_jlc_preview(
     fid: int,
