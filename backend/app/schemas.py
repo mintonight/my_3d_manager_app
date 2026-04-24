@@ -98,6 +98,12 @@ class FileVersionOut(BaseModel):
     is_current: bool
 
 
+class EDrawingsOpenTicketOut(BaseModel):
+    protocol_url: str
+    download_url: str
+    expires_in_seconds: int
+
+
 class CommitMessage(BaseModel):
     commit_message: str = Field(default="", max_length=512)
 

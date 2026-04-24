@@ -46,7 +46,7 @@
   - STL、OBJ、GLTF、GLB 和 DXF。
 - STEP / STP 文件使用 `occt-import-js` 和 three.js 在浏览器中渲染 3D 模型。
 - SolidWorks 原生文件（`.sldprt` / `.sldasm` / `.slddrw`）不再提取内嵌缩略图，预览页直接提供两个入口：
-  - 使用本机 eDrawings 打开当前版本。
+  - 使用本机 eDrawings 助手打开当前版本。
   - 使用嘉立创在线预览打开当前版本。
 - 预览模块按需懒加载，不进入预览时不下载对应 JS/WASM。
 
@@ -103,7 +103,7 @@
 - 本地文件系统 + SHA256 内容寻址存储
 - ZIP 流式打包
 - `httpx` 代理嘉立创在线预览
-- `subprocess` 调用本机 eDrawings
+- 短期票据 + `zgg-edrawings://` 协议唤起本机 eDrawings 助手
 
 ### 前端
 
@@ -157,6 +157,10 @@ zhihu_article/
         ├── types.ts
         ├── pages/
         └── components/
+└── tools/
+    └── edrawings-helper/
+        ├── edrawings_helper.py
+        └── install_protocol.ps1
 ```
 
 ## 快速开始
@@ -195,6 +199,16 @@ npm run dev
 默认地址：<http://localhost:5173>
 
 Vite 会把 `/api/*` 请求代理到 `http://127.0.0.1:8000`。
+
+### 启用本机 eDrawings 助手
+
+SolidWorks 原生文件的“使用本机助手打开”依赖 Windows 客户端注册 `zgg-edrawings://` 协议。每台需要本机打开 SolidWorks 文件的客户端执行一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\edrawings-helper\install_protocol.ps1 -EDrawingsPath "C:\Program Files\SOLIDWORKS Corp\eDrawings\eDrawings.exe"
+```
+
+之后在预览页点击“使用本机助手打开”时，浏览器会唤起本机助手；助手用短期票据下载当前版本到本地临时缓存，并调用本机 eDrawings 打开。
 
 ### 常用命令
 
@@ -262,7 +276,8 @@ npm run build
 
 ### SolidWorks 预览入口
 
-- `POST /api/projects/{pid}/files/{fid}/versions/{vid}/edrawings-open`
+- `POST /api/projects/{pid}/files/{fid}/versions/{vid}/edrawings-ticket`
+- `GET /api/projects/{pid}/files/{fid}/versions/{vid}/edrawings-ticket/{token}/download`
 - `POST /api/projects/{pid}/files/{fid}/versions/{vid}/jlc-preview`
 
 ### 评论与通知
@@ -292,7 +307,7 @@ npm run build
 7. 下载单个版本或项目整包，项目成员和超级管理员会收到下载通知。
 8. 给文件或版本发表评论，并 @ 项目成员。
 9. 使用通知铃跳转到评论或查看下载审计通知。
-10. 对 STEP / STP 文件直接浏览器预览；对 SolidWorks 文件选择 eDrawings 或嘉立创在线预览。
+10. 对 STEP / STP 文件直接浏览器预览；对 SolidWorks 文件选择本机 eDrawings 助手或嘉立创在线预览。
 11. 用超级管理员登录，查看所有项目并执行项目备份、数据导出或数据恢复。
 
 ## 存储机制
@@ -314,14 +329,15 @@ backend/data/blobs/<sha256[:2]>/<sha256[2:]>
 
 SolidWorks 原生文件属于闭源格式，浏览器不能直接稳定渲染。当前策略是不做缩略图提取，用户在预览页主动选择：
 
-- **本机 eDrawings：** 后端把当前版本文件准备到缓存目录，并调用配置的 eDrawings 可执行文件打开。
+- **本机 eDrawings 助手：** 后端签发 5 分钟有效的短期打开票据；前端打开 `zgg-edrawings://` 协议；Windows 客户端助手下载当前版本到本地临时缓存，并调用本机 eDrawings 打开。
 - **嘉立创在线预览：** 后端通过 `httpx` 把当前版本原文件上传到嘉立创 3D Viewer，并返回在线预览地址。
 
 注意事项：
 
 - 嘉立创在线预览会把文件上传到第三方服务，适合作为用户主动选择的可选能力。
 - 嘉立创接口限制单文件不超过 100 MB。
-- 本机 eDrawings 依赖服务端运行环境能访问对应可执行文件路径。
+- 本机 eDrawings 助手依赖客户端 Windows 环境已安装 Python、eDrawings，并已注册 `zgg-edrawings://` 协议。
+- Docker 部署时服务端不需要安装 eDrawings；本机打开能力由各客户端助手完成。
 
 ## 后续可迭代
 

@@ -10,6 +10,12 @@ interface Props {
   filename: string;
 }
 
+interface EDrawingsTicket {
+  protocol_url: string;
+  download_url: string;
+  expires_in_seconds: number;
+}
+
 async function readErrorDetail(response: Response, fallback: string) {
   let detail = fallback;
   try {
@@ -29,18 +35,18 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
   const text = isZh
     ? {
         jlcMissingUrl: '嘉立创未返回预览地址',
-        localOpened: '已调用本机 eDrawings 打开当前版本',
+        localOpened: '已唤起本机 eDrawings 助手',
         title: 'SolidWorks 文件预览',
-        hint: '请选择本机 eDrawings 或嘉立创在线预览打开当前文件版本。',
-        openLocal: '使用本机 eDrawings 打开',
+        hint: '请选择本机 eDrawings 助手或嘉立创在线预览打开当前文件版本。',
+        openLocal: '使用本机助手打开',
         openJlc: '使用嘉立创在线预览',
       }
     : {
         jlcMissingUrl: 'JLC did not return a preview URL',
-        localOpened: 'Opened the current version with local eDrawings',
+        localOpened: 'Launched the local eDrawings helper',
         title: 'SolidWorks Preview',
-        hint: 'Open the current file version with local eDrawings or JLC Online Preview.',
-        openLocal: 'Open with Local eDrawings',
+        hint: 'Open the current file version with the local eDrawings helper or JLC Online Preview.',
+        openLocal: 'Open with Local Helper',
         openJlc: 'Open JLC Online Preview',
       };
 
@@ -74,7 +80,7 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
     setLocalLoading(true);
     try {
       const response = await fetch(
-        `/api/projects/${pid}/files/${fid}/versions/${vid}/edrawings-open`,
+        `/api/projects/${pid}/files/${fid}/versions/${vid}/edrawings-ticket`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${getToken()}` },
@@ -83,6 +89,13 @@ export default function SolidWorksPreview({ pid, fid, vid, filename }: Props) {
       if (!response.ok) {
         throw new Error(await readErrorDetail(response, `HTTP ${response.status}`));
       }
+      const body = (await response.json()) as EDrawingsTicket;
+      const downloadUrl = body.download_url.startsWith('http')
+        ? body.download_url
+        : `${window.location.origin}${body.download_url}`;
+      const protocolUrl =
+        `zgg-edrawings://open?url=${encodeURIComponent(downloadUrl)}&filename=${encodeURIComponent(filename)}`;
+      window.location.href = protocolUrl;
       message.success(text.localOpened);
     } catch (e) {
       message.error((e as Error).message || String(e));

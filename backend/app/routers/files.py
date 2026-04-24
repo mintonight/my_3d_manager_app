@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from urllib.parse import quote
 
 from ..config import settings
 from ..deps import get_db, require_project_role
@@ -15,7 +16,8 @@ from ..notification_events import create_file_download_notifications
 from ..models import File as FileModel
 from ..models import FileVersion, Project, User
 from ..preview import extract_solidworks_thumbnail, list_ole_streams
-from ..schemas import FileOut, FileVersionOut
+from ..schemas import EDrawingsOpenTicketOut, FileOut, FileVersionOut
+from ..security import create_edrawings_open_ticket, decode_edrawings_open_ticket
 from ..storage import get_blob_path, save_blob
 
 
@@ -24,6 +26,7 @@ router = APIRouter(prefix="/api/projects/{pid}/files", tags=["files"])
 JLC_VIEWER_API = "https://api.forface3d.com/forface/model/viewer/browser/v1/uploadModel"
 JLC_VIEWER_URL = "https://3d-viewer.jlc.com/viewer"
 JLC_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+EDRAWINGS_TICKET_EXPIRES_SECONDS = 5 * 60
 
 
 def _display_name(raw: str) -> str:
@@ -72,6 +75,21 @@ def _file_out(f: FileModel, db: Session) -> FileOut:
         current_version_id=f.current_version_id,
         created_at=f.created_at,
     )
+
+
+def _get_file_version_or_404(
+    db: Session,
+    project_id: int,
+    fid: int,
+    vid: int,
+) -> tuple[FileModel, FileVersion]:
+    f = db.get(FileModel, fid)
+    if not f or f.project_id != project_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    v = db.get(FileVersion, vid)
+    if not v or v.file_id != fid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
+    return f, v
 
 
 def _sanitize_rel_path(raw: str) -> str:
@@ -454,6 +472,77 @@ def open_in_edrawings(
         )
 
     return {"status": "launched", "filename": _display_name(f.name)}
+
+
+@router.post("/{fid}/versions/{vid}/edrawings-ticket", response_model=EDrawingsOpenTicketOut)
+def create_edrawings_ticket(
+    fid: int,
+    vid: int,
+    request: Request,
+    ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
+    db: Session = Depends(get_db),
+) -> EDrawingsOpenTicketOut:
+    p, user, _ = ctx
+    f, _ = _get_file_version_or_404(db, p.id, fid, vid)
+    token = create_edrawings_open_ticket(
+        project_id=p.id,
+        file_id=fid,
+        version_id=vid,
+        actor_id=user.id,
+        expires_minutes=EDRAWINGS_TICKET_EXPIRES_SECONDS // 60,
+    )
+    path = f"/api/projects/{p.id}/files/{fid}/versions/{vid}/edrawings-ticket/{token}/download"
+    absolute_download_url = str(request.base_url).rstrip("/") + path
+    protocol_url = (
+        "zgg-edrawings://open"
+        f"?url={quote(absolute_download_url, safe='')}"
+        f"&filename={quote(_display_name(f.name), safe='')}"
+    )
+    return EDrawingsOpenTicketOut(
+        protocol_url=protocol_url,
+        download_url=path,
+        expires_in_seconds=EDRAWINGS_TICKET_EXPIRES_SECONDS,
+    )
+
+
+@router.get("/{fid}/versions/{vid}/edrawings-ticket/{token}/download")
+def download_edrawings_ticket(
+    fid: int,
+    vid: int,
+    token: str,
+    pid: int,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    try:
+        payload = decode_edrawings_open_ticket(token)
+    except ValueError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid token")
+    if (
+        payload["project_id"] != pid
+        or payload["file_id"] != fid
+        or payload["version_id"] != vid
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid token")
+
+    p = db.get(Project, pid)
+    if not p:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
+    f, v = _get_file_version_or_404(db, pid, fid, vid)
+    actor = db.get(User, payload["actor_id"])
+    if not actor:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid token")
+    try:
+        path = get_blob_path(v.blob_hash)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+
+    create_file_download_notifications(db, p, f, v, actor)
+    db.commit()
+    return FileResponse(
+        path,
+        filename=f"{f.name}.v{v.version_no}",
+        media_type="application/octet-stream",
+    )
 
 
 @router.get("/{fid}/versions/{vid}/thumbnail")
