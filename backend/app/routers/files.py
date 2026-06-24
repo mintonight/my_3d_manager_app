@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 import hashlib
 import httpx
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -17,12 +18,54 @@ from ..models import FileVersion, Project, User
 from ..preview import extract_solidworks_thumbnail, list_ole_streams
 from ..schemas import FileOut, FileVersionOut
 from ..storage import get_blob_path, save_blob
+from ..sw_converter import is_solidworks_file, convert_to_step
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/projects/{pid}/files", tags=["files"])
 
 JLC_VIEWER_API = "https://api.forface3d.com/forface/model/viewer/browser/v1/uploadModel"
 JLC_VIEWER_URL = "https://3d-viewer.jlc.com/viewer"
+
+
+def _maybe_schedule_step_conversion(
+    background_tasks: BackgroundTasks,
+    fid: int,
+    vid: int,
+    blob_hash: str,
+    filename: str,
+) -> None:
+    if not settings.solidworks_enabled:
+        return
+    if not is_solidworks_file(filename):
+        return
+    background_tasks.add_task(_run_step_conversion, fid, vid, blob_hash, filename)
+
+
+def _run_step_conversion(fid: int, vid: int, blob_hash: str, filename: str) -> None:
+    """Background task: convert SW blob to STEP, update DB."""
+    from ..sw_converter import _ensure_pywin32_dlls
+    _ensure_pywin32_dlls()
+
+    from ..database import SessionLocal
+
+    try:
+        source = get_blob_path(blob_hash)
+        step_bytes = convert_to_step(source, filename)
+        if step_bytes is None:
+            return
+        step_hash = save_blob(step_bytes)
+        db = SessionLocal()
+        try:
+            v = db.get(FileVersion, vid)
+            if v and v.file_id == fid:
+                v.step_blob_hash = step_hash
+                db.commit()
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Background STEP conversion failed for %s", filename)
 JLC_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
@@ -112,6 +155,7 @@ def list_files(
 async def upload_new_file(
     upload: UploadFile = File(...),
     commit_message: str = Form(default=""),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     ctx: tuple[Project, User, str] = Depends(require_project_role("editor")),
     db: Session = Depends(get_db),
 ) -> FileOut:
@@ -142,6 +186,7 @@ async def upload_new_file(
     f.current_version_id = v.id
     db.commit()
     db.refresh(f)
+    _maybe_schedule_step_conversion(background_tasks, f.id, v.id, blob_hash, name)
     return _file_out(f, db)
 
 
@@ -150,6 +195,7 @@ async def upload_folder(
     uploads: list[UploadFile] = File(...),
     paths: list[str] = Form(...),
     commit_message: str = Form(default=""),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     ctx: tuple[Project, User, str] = Depends(require_project_role("editor")),
     db: Session = Depends(get_db),
 ) -> list[FileOut]:
@@ -165,6 +211,7 @@ async def upload_folder(
     clean_paths = [_sanitize_rel_path(p_) for p_ in paths]
 
     results: list[FileModel] = []
+    step_candidates: list[tuple[int, int, str, str]] = []
     for upload, rel_path in zip(uploads, clean_paths):
         content = await upload.read()
         blob_hash = save_blob(content)
@@ -191,6 +238,7 @@ async def upload_folder(
             db.flush()
             existing.current_version_id = v.id
             results.append(existing)
+            step_candidates.append((existing.id, v.id, blob_hash, rel_path))
         else:
             f = FileModel(project_id=p.id, name=rel_path)
             db.add(f)
@@ -207,8 +255,11 @@ async def upload_folder(
             db.flush()
             f.current_version_id = v.id
             results.append(f)
+            step_candidates.append((f.id, v.id, blob_hash, rel_path))
 
     db.commit()
+    for fid, vid, bh, name in step_candidates:
+        _maybe_schedule_step_conversion(background_tasks, fid, vid, bh, name)
     for f in results:
         db.refresh(f)
     return [_file_out(f, db) for f in results]
@@ -219,6 +270,7 @@ async def commit_new_version(
     fid: int,
     upload: UploadFile = File(...),
     commit_message: str = Form(default=""),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     ctx: tuple[Project, User, str] = Depends(require_project_role("editor")),
     db: Session = Depends(get_db),
 ) -> FileVersionOut:
@@ -260,6 +312,7 @@ async def commit_new_version(
     f.current_version_id = v.id
     db.commit()
     db.refresh(v)
+    _maybe_schedule_step_conversion(background_tasks, fid, v.id, new_hash, f.name)
     return FileVersionOut(
         id=v.id,
         version_no=v.version_no,
@@ -270,6 +323,7 @@ async def commit_new_version(
         author_username=user.username,
         created_at=v.created_at,
         is_current=True,
+        step_blob_hash=v.step_blob_hash,
     )
 
 
@@ -302,6 +356,7 @@ def list_versions(
             author_username=u.username,
             created_at=v.created_at,
             is_current=(v.id == current_id),
+            step_blob_hash=v.step_blob_hash,
         )
         for v, u in rows
     ]
@@ -350,6 +405,34 @@ def get_version_content(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
     try:
         path = get_blob_path(v.blob_hash)
+    except FileNotFoundError:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.get("/{fid}/versions/{vid}/step-content")
+def get_step_content(
+    fid: int,
+    vid: int,
+    ctx: tuple[Project, User, str] = Depends(require_project_role("viewer")),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Serve the STEP derivative for a SolidWorks file version."""
+    p, _, _ = ctx
+    f = db.get(FileModel, fid)
+    if not f or f.project_id != p.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
+    v = db.get(FileVersion, vid)
+    if not v or v.file_id != fid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "version not found")
+    if not v.step_blob_hash:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "STEP derivative not available")
+    try:
+        path = get_blob_path(v.step_blob_hash)
     except FileNotFoundError:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "blob missing from storage")
     return FileResponse(

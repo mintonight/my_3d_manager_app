@@ -96,6 +96,7 @@ class FileVersionOut(BaseModel):
     author_username: str
     created_at: datetime
     is_current: bool
+    step_blob_hash: str | None = None
 
 
 class CommitMessage(BaseModel):

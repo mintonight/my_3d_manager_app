@@ -53,6 +53,7 @@ export interface FileVersion {
   author_username: string;
   created_at: string;
   is_current: boolean;
+  step_blob_hash: string | null;
 }
 
 export interface SearchProjectItem {

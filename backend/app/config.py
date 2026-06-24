@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     admin_password: str = "superadmin"
     edrawings_exe_path: Path = DEFAULT_EDRAWINGS_EXE_PATH
     edrawings_cache_dir: Path = DEFAULT_EDRAWINGS_CACHE_DIR
+    solidworks_enabled: bool = True
 
     class Config:
         env_prefix = "ZGG_"

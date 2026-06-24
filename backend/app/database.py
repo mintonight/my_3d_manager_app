@@ -40,8 +40,21 @@ def _migrate_users_table() -> None:
             )
 
 
+def _migrate_file_versions_table() -> None:
+    inspector = inspect(engine)
+    if "file_versions" not in inspector.get_table_names():
+        return
+    column_names = {column["name"] for column in inspector.get_columns("file_versions")}
+    with engine.begin() as conn:
+        if "step_blob_hash" not in column_names:
+            conn.execute(
+                text("ALTER TABLE file_versions ADD COLUMN step_blob_hash VARCHAR(64)")
+            )
+
+
 def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _migrate_users_table()
+    _migrate_file_versions_table()

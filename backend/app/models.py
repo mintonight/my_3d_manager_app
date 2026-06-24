@@ -78,6 +78,7 @@ class FileVersion(Base):
     commit_message: Mapped[str] = mapped_column(String(512), default="")
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    step_blob_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Comment(Base):
