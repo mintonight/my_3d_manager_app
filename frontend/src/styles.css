@@ -687,8 +687,8 @@ textarea.ant-input::placeholder {
 
 .apple-shell__actions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
   gap: 8px;
 }
 
@@ -815,8 +815,8 @@ textarea.ant-input::placeholder {
 }
 
 .apple-stat {
-  min-width: 180px;
-  padding: 16px 18px;
+  min-width: 0;
+  padding: 8px 14px;
   border-radius: var(--ln-radius-card);
   background: var(--ln-surface);
   border: 1px solid var(--ln-border-standard);
@@ -836,12 +836,12 @@ textarea.ant-input::placeholder {
 
 .apple-stat__value {
   display: block;
-  margin-top: 8px;
+  margin-top: 2px;
   font-family: var(--ln-font-sans);
-  font-size: 28px;
+  font-size: 20px;
   font-weight: 510;
   line-height: 1;
-  letter-spacing: -0.56px;
+  letter-spacing: -0.4px;
   color: var(--ln-text);
   font-feature-settings: "cv01", "ss03";
 }
@@ -1155,7 +1155,7 @@ textarea.ant-input::placeholder {
     width: 100%;
     flex-direction: row;
     justify-content: flex-start;
-    align-items: stretch;
+    align-items: flex-start;
     flex-wrap: wrap;
   }
 }

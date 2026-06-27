@@ -348,6 +348,7 @@ const darkTheme: ThemeConfig = {
       tailColor: 'rgba(255, 255, 255, 0.12)',
     },
     List: {
+      colorBgContainer: '#141a22',
       colorBorder: 'rgba(255, 255, 255, 0.08)',
     },
     Empty: {

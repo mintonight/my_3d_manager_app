@@ -31,7 +31,10 @@ export default function PreviewModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [versionInfo, setVersionInfo] = useState<FileVersion | null>(null);
+  const [stepTimedOut, setStepTimedOut] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollCountRef = useRef(0);
+  const STEP_POLL_MAX = 30; // ~90s at 3s interval; then give up and degrade
 
   const kind = getPreviewKind(filename);
   const isSwFile = kind === 'solidworks';
@@ -57,6 +60,8 @@ export default function PreviewModal({
       setBlob(null);
       setError(null);
       setVersionInfo(null);
+      setStepTimedOut(false);
+      pollCountRef.current = 0;
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
         pollingRef.current = null;
@@ -104,6 +109,15 @@ export default function PreviewModal({
     fetchVersionInfo();
 
     pollingRef.current = setInterval(() => {
+      pollCountRef.current += 1;
+      if (pollCountRef.current >= STEP_POLL_MAX) {
+        if (pollingRef.current) {
+          clearInterval(pollingRef.current);
+          pollingRef.current = null;
+        }
+        setStepTimedOut(true);
+        return;
+      }
       fetchVersionInfo();
     }, 3000);
 
@@ -201,7 +215,7 @@ export default function PreviewModal({
       destroyOnClose
     >
       <div className="apple-preview-stage">
-        {isSwFile && !hasStepDerivative && !error && (
+        {isSwFile && !hasStepDerivative && !stepTimedOut && !error && (
           <div style={{ padding: 80, textAlign: 'center' }}>
             <Spin tip={text.convertingStep} size="large" />
           </div>

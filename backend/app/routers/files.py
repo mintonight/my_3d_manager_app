@@ -45,9 +45,6 @@ def _maybe_schedule_step_conversion(
 
 def _run_step_conversion(fid: int, vid: int, blob_hash: str, filename: str) -> None:
     """Background task: convert SW blob to STEP, update DB."""
-    from ..sw_converter import _ensure_pywin32_dlls
-    _ensure_pywin32_dlls()
-
     from ..database import SessionLocal
 
     try:

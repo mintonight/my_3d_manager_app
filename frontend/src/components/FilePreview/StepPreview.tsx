@@ -21,7 +21,7 @@ interface OcctResult {
   meshes: OcctMesh[];
 }
 
-const COLORS = [0x4a90e2, 0xe27d60, 0x7d8c54, 0xb86bff, 0xf4a261, 0x2a9d8f];
+const COLORS = [0xffffff, 0xe27d60, 0x7d8c54, 0xb86bff, 0xf4a261, 0x2a9d8f];
 
 export default function StepPreview({ blob }: PreviewProps) {
   const { user } = useAuth();
@@ -136,13 +136,17 @@ export default function StepPreview({ blob }: PreviewProps) {
 
         const box = new THREE.Box3().setFromObject(group);
         const center = box.getCenter(new THREE.Vector3());
-        group.position.sub(center);
+        const sizeVec = box.getSize(new THREE.Vector3());
+        // Center horizontally (X/Z) and rest on the grid (bottom at y=0).
+        group.position.x -= center.x;
+        group.position.z -= center.z;
+        group.position.y -= box.min.y;
         scene.add(group);
 
-        const size = box.getSize(new THREE.Vector3()).length();
+        const size = sizeVec.length();
         const camDist = size * 1.8;
         camera.position.set(camDist, camDist * 0.75, camDist);
-        camera.lookAt(0, 0, 0);
+        camera.lookAt(0, sizeVec.y / 2, 0);
 
         const axis = new THREE.AxesHelper(size * 0.5);
         scene.add(axis);
@@ -152,7 +156,8 @@ export default function StepPreview({ blob }: PreviewProps) {
           isDark ? 0x5d6b7d : 0x999999,
           isDark ? 0x324051 : 0xdddddd,
         );
-        grid.position.y = -size / 2;
+        // Grid lies on the ground plane (y=0), matching the model's bottom.
+        grid.position.y = 0;
         scene.add(grid);
 
         const controls = new OrbitControls(camera, renderer.domElement);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { SettingOutlined } from '@ant-design/icons';
-import { Button, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
+import { LogoutOutlined, ProjectOutlined, SettingOutlined } from '@ant-design/icons';
+import { Button, Divider, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { extractError } from '../api';
 import { useAuth } from '../auth';
 import { useI18n } from '../i18n';
@@ -13,8 +14,9 @@ interface FormValues {
 }
 
 export default function UserSettingsButton() {
-  const { user, updateSettings } = useAuth();
+  const { user, updateSettings, logout } = useAuth();
   const { isZh, languageLabel, themeLabel } = useI18n();
+  const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<FormValues>();
@@ -36,6 +38,14 @@ export default function UserSettingsButton() {
         title: '个人设置',
         save: '保存',
         cancel: '取消',
+        account: '账号',
+        navigation: '导航',
+        preferences: '偏好',
+        actions: '操作',
+        admin: '管理员',
+        allProjects: '全部项目',
+        myProjects: '我的项目',
+        logout: '退出登录',
         language: '界面语言',
         theme: '界面主题',
         edrawingsPath: 'eDrawings 路径',
@@ -48,6 +58,14 @@ export default function UserSettingsButton() {
         title: 'User Settings',
         save: 'Save',
         cancel: 'Cancel',
+        account: 'Account',
+        navigation: 'Navigation',
+        preferences: 'Preferences',
+        actions: 'Actions',
+        admin: 'Admin',
+        allProjects: 'All Projects',
+        myProjects: 'My Projects',
+        logout: 'Sign Out',
         language: 'Language',
         theme: 'Theme',
         edrawingsPath: 'eDrawings Path',
@@ -74,6 +92,16 @@ export default function UserSettingsButton() {
     }
   };
 
+  const goToProjects = () => {
+    setOpen(false);
+    nav('/projects');
+  };
+
+  const onLogout = () => {
+    setOpen(false);
+    logout();
+  };
+
   return (
     <>
       <Button
@@ -92,7 +120,42 @@ export default function UserSettingsButton() {
         cancelText={text.cancel}
         confirmLoading={saving}
       >
-        <Form form={form} layout="vertical" onFinish={submit}>
+        {/* 账号 / Account */}
+        <Typography.Text type="secondary" strong style={{ fontSize: 12 }}>
+          {text.account}
+        </Typography.Text>
+        <div style={{ margin: '8px 0 4px' }}>
+          <Space size={8} wrap align="center">
+            <Typography.Text strong>{user.username}</Typography.Text>
+            <Typography.Text type="secondary">{user.email}</Typography.Text>
+            {user.is_admin && <Typography.Text type="warning">{text.admin}</Typography.Text>}
+          </Space>
+        </div>
+
+        <Divider style={{ margin: '16px 0' }} />
+
+        {/* 导航 / Navigation */}
+        <Typography.Text type="secondary" strong style={{ fontSize: 12 }}>
+          {text.navigation}
+        </Typography.Text>
+        <div style={{ margin: '8px 0 4px' }}>
+          <Button
+            block
+            icon={<ProjectOutlined />}
+            className="apple-pill-button"
+            onClick={goToProjects}
+          >
+            {user.is_admin ? text.allProjects : text.myProjects}
+          </Button>
+        </div>
+
+        <Divider style={{ margin: '16px 0' }} />
+
+        {/* 偏好 / Preferences */}
+        <Typography.Text type="secondary" strong style={{ fontSize: 12 }}>
+          {text.preferences}
+        </Typography.Text>
+        <Form form={form} layout="vertical" onFinish={submit} style={{ marginTop: 8 }}>
           <Form.Item name="ui_language" label={text.language} rules={[{ required: true }]}>
             <Select
               options={[
@@ -112,12 +175,17 @@ export default function UserSettingsButton() {
           <Form.Item name="edrawings_exe_path" label={text.edrawingsPath}>
             <Input placeholder={text.pathPlaceholder} />
           </Form.Item>
-          <Space direction="vertical" size={2}>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {text.edrawingsHint}
-            </Typography.Text>
-          </Space>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {text.edrawingsHint}
+          </Typography.Text>
         </Form>
+
+        <Divider style={{ margin: '16px 0' }} />
+
+        {/* 操作 / Actions */}
+        <Button block danger icon={<LogoutOutlined />} className="apple-pill-button" onClick={onLogout}>
+          {text.logout}
+        </Button>
       </Modal>
     </>
   );
