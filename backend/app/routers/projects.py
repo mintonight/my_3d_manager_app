@@ -559,6 +559,63 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> None:
     p, _, _ = ctx
+    pid = p.id
+
+    # Cascade-delete all dependent data explicitly. File/FileVersion/Comment/etc.
+    # have no ORM relationship back to Project, so deleting the Project row alone
+    # would orphan them; with SQLite reusing autoincrement ids after a delete,
+    # a newly created project could otherwise inherit a previous project's files.
+    file_ids = [
+        row[0]
+        for row in db.query(FileModel.id).filter(FileModel.project_id == pid).all()
+    ]
+
+    if file_ids:
+        version_ids = [
+            row[0]
+            for row in db.query(FileVersion.id).filter(FileVersion.file_id.in_(file_ids)).all()
+        ]
+        # Comments and their mentions
+        comment_ids = [
+            row[0]
+            for row in db.query(Comment.id).filter(Comment.file_id.in_(file_ids)).all()
+        ]
+        if comment_ids:
+            db.query(CommentMention).filter(
+                CommentMention.comment_id.in_(comment_ids)
+            ).delete(synchronize_session=False)
+            db.query(Notification).filter(
+                Notification.comment_id.in_(comment_ids)
+            ).delete(synchronize_session=False)
+            db.query(Comment).filter(Comment.id.in_(comment_ids)).delete(
+                synchronize_session=False
+            )
+        # Download notifications referencing these files/versions
+        db.query(DownloadNotification).filter(
+            DownloadNotification.file_id.in_(file_ids)
+        ).delete(synchronize_session=False)
+        # File versions and files (clear current_version_id FK first)
+        db.query(FileModel).filter(FileModel.project_id == pid).update(
+            {FileModel.current_version_id: None}, synchronize_session=False
+        )
+        db.query(FileVersion).filter(FileVersion.file_id.in_(file_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(FileModel).filter(FileModel.id.in_(file_ids)).delete(
+            synchronize_session=False
+        )
+
+    # Download notifications referencing the project directly
+    db.query(DownloadNotification).filter(
+        DownloadNotification.project_id == pid
+    ).delete(synchronize_session=False)
+
+    # ProjectMember is removed via the Project cascade, but delete explicitly
+    # to be safe regardless of relationship/cascade config.
+    db.query(ProjectMember).filter(ProjectMember.project_id == pid).delete(
+        synchronize_session=False
+    )
+
     db.delete(p)
     db.commit()
 
