@@ -4,6 +4,7 @@ import { FolderOpenOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RcFile } from 'antd/es/upload';
 import { api, extractError } from '../api';
 import { useI18n } from '../i18n';
+import { pollStepDerivative } from './stepPoll';
 
 type Mode = 'file' | 'folder';
 
@@ -47,6 +48,7 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
         folderSummary: (count: number) =>
           `共选中 ${formatNumber(count)} 个文件。已有同名文件会按新版本提交。`,
         commitMessagePlaceholder: '提交说明，可选',
+        stepReady: (name: string) => `${name} 已转换为 STEP，可预览`,
       }
     : {
         chooseFolderFirst: 'Please choose a folder first',
@@ -64,6 +66,7 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
         folderSummary: (count: number) =>
           `${formatNumber(count)} files selected. Existing files with the same name will be committed as new versions.`,
         commitMessagePlaceholder: 'Commit message (optional)',
+        stepReady: (name: string) => `${name} converted to STEP, ready to preview`,
       };
 
   const reset = () => {
@@ -101,8 +104,36 @@ export default function UploadFile({ pid, fid, mode = 'file', buttonText, onDone
       if (isFolder) {
         const count = Array.isArray(response.data) ? response.data.length : files.length;
         message.success(text.uploadedCount(count));
+        // Watch each uploaded file for STEP conversion completion.
+        if (Array.isArray(response.data)) {
+          response.data.forEach((f: { id: number; name: string; current_version_id: number | null }) => {
+            if (f.current_version_id) {
+              pollStepDerivative({
+                pid,
+                fid: f.id,
+                vid: f.current_version_id,
+                filename: f.name,
+                onDone: (name) => message.success(text.stepReady(name)),
+              });
+            }
+          });
+        }
       } else {
         message.success(fid ? text.committed : text.uploaded);
+        const data = response.data as { id?: number; current_version_id?: number | null };
+        // New upload returns FileOut (with id + current_version_id);
+        // new version returns FileVersionOut (with id only, fid already known).
+        const watchFid = fid ?? data.id;
+        const watchVid = fid ? data.id : data.current_version_id;
+        if (watchFid && watchVid && files[0]) {
+          pollStepDerivative({
+            pid,
+            fid: watchFid,
+            vid: watchVid,
+            filename: relPath(files[0]),
+            onDone: (name) => message.success(text.stepReady(name)),
+          });
+        }
       }
       setOpen(false);
       reset();
