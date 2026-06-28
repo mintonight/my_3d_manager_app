@@ -21,7 +21,6 @@ from ..deps import (
     require_project_role,
 )
 from ..models import Comment, CommentMention, Notification
-from ..models import DownloadNotification
 from ..models import File as FileModel
 from ..models import FileVersion, Project, ProjectMember, User
 from ..notification_events import create_project_download_notifications
@@ -171,16 +170,6 @@ def _full_backup_payload(db: Session) -> dict:
                 "id": row.id,
                 "user_id": row.user_id,
                 "comment_id": row.comment_id,
-                "type": row.type,
-                "is_read": row.is_read,
-                "created_at": _dt(row.created_at),
-            }
-            for row in db.query(Notification).order_by(Notification.id.asc()).all()
-        ],
-        "download_notifications": [
-            {
-                "id": row.id,
-                "user_id": row.user_id,
                 "project_id": row.project_id,
                 "file_id": row.file_id,
                 "file_version_id": row.file_version_id,
@@ -190,7 +179,7 @@ def _full_backup_payload(db: Session) -> dict:
                 "is_read": row.is_read,
                 "created_at": _dt(row.created_at),
             }
-            for row in db.query(DownloadNotification).order_by(DownloadNotification.id.asc()).all()
+            for row in db.query(Notification).order_by(Notification.id.asc()).all()
         ],
     }
 
@@ -245,7 +234,6 @@ def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"backup missing blobs: {missing[:5]}")
 
     db.query(FileModel).update({FileModel.current_version_id: None})
-    db.query(DownloadNotification).delete(synchronize_session=False)
     db.query(Notification).delete(synchronize_session=False)
     db.query(CommentMention).delete(synchronize_session=False)
     db.query(Comment).delete(synchronize_session=False)
@@ -350,22 +338,28 @@ def _restore_full_backup(db: Session, payload: dict, archive: zipfile.ZipFile) -
             Notification(
                 id=row["id"],
                 user_id=row["user_id"],
-                comment_id=row["comment_id"],
+                comment_id=row.get("comment_id"),
+                project_id=row.get("project_id"),
+                file_id=row.get("file_id"),
+                file_version_id=row.get("file_version_id"),
+                actor_id=row.get("actor_id"),
                 type=row["type"],
+                message=row.get("message"),
                 is_read=row["is_read"],
                 created_at=_parse_dt(row["created_at"]),
             )
         )
     db.flush()
 
+    # Backward compat: pre-merge backups stored downloads in a separate array.
+    # Fold them in as notifications with comment_id NULL.
     for row in payload.get("download_notifications", []):
         db.add(
-            DownloadNotification(
-                id=row["id"],
+            Notification(
                 user_id=row["user_id"],
                 project_id=row["project_id"],
-                file_id=row["file_id"],
-                file_version_id=row["file_version_id"],
+                file_id=row.get("file_id"),
+                file_version_id=row.get("file_version_id"),
                 actor_id=row["actor_id"],
                 type=row["type"],
                 message=row["message"],
@@ -596,9 +590,9 @@ def delete_project(
             db.query(Comment).filter(Comment.id.in_(comment_ids)).delete(
                 synchronize_session=False
             )
-        # Download notifications referencing these files/versions
-        db.query(DownloadNotification).filter(
-            DownloadNotification.file_id.in_(file_ids)
+        # Download notifications referencing these files (unified table)
+        db.query(Notification).filter(
+            Notification.file_id.in_(file_ids)
         ).delete(synchronize_session=False)
         # File versions and files (clear current_version_id FK first)
         db.query(FileModel).filter(FileModel.project_id == pid).update(
@@ -612,8 +606,8 @@ def delete_project(
         )
 
     # Download notifications referencing the project directly
-    db.query(DownloadNotification).filter(
-        DownloadNotification.project_id == pid
+    db.query(Notification).filter(
+        Notification.project_id == pid
     ).delete(synchronize_session=False)
 
     # ProjectMember is removed via the Project cascade, but delete explicitly

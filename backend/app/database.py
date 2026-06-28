@@ -16,76 +16,100 @@ class Base(DeclarativeBase):
     pass
 
 
-def _migrate_users_table() -> None:
+# Columns introduced after first release; added to pre-existing SQLite DBs on
+# startup. Each tuple: (table, column, "TYPE [DEFAULT ...]" appended after
+# ADD COLUMN). Values are static literals, never user input.
+_ADD_COLUMN_MIGRATIONS = [
+    ("users", "is_admin", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("users", "ui_language", "VARCHAR(16) NOT NULL DEFAULT 'zh-CN'"),
+    ("users", "ui_theme", "VARCHAR(16) NOT NULL DEFAULT 'light'"),
+    ("users", "edrawings_exe_path", "VARCHAR(512)"),
+    ("file_versions", "step_blob_hash", "VARCHAR(64)"),
+    ("files", "is_deleted", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("projects", "head_commit_id", "INTEGER"),
+]
+
+
+def _run_migrations() -> None:
+    """Add any missing columns to existing tables (idempotent)."""
     inspector = inspect(engine)
-    if "users" not in inspector.get_table_names():
-        return
-    column_names = {column["name"] for column in inspector.get_columns("users")}
-    with engine.begin() as conn:
-        if "is_admin" not in column_names:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
-            )
-        if "ui_language" not in column_names:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN ui_language VARCHAR(16) NOT NULL DEFAULT 'zh-CN'")
-            )
-        if "ui_theme" not in column_names:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN ui_theme VARCHAR(16) NOT NULL DEFAULT 'light'")
-            )
-        if "edrawings_exe_path" not in column_names:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN edrawings_exe_path VARCHAR(512)")
-            )
+    tables = set(inspector.get_table_names())
 
+    # Group per table so each table alters in a single transaction.
+    by_table: dict[str, list[tuple[str, str]]] = {}
+    for table, column, ddl in _ADD_COLUMN_MIGRATIONS:
+        if table in tables:
+            by_table.setdefault(table, []).append((column, ddl))
 
-def _migrate_file_versions_table() -> None:
-    inspector = inspect(engine)
-    if "file_versions" not in inspector.get_table_names():
-        return
-    column_names = {column["name"] for column in inspector.get_columns("file_versions")}
-    with engine.begin() as conn:
-        if "step_blob_hash" not in column_names:
-            conn.execute(
-                text("ALTER TABLE file_versions ADD COLUMN step_blob_hash VARCHAR(64)")
-            )
-
-
-def _migrate_files_is_deleted() -> None:
-    """Add is_deleted soft-delete column to files if missing."""
-    inspector = inspect(engine)
-    if "files" not in inspector.get_table_names():
-        return
-    column_names = {column["name"] for column in inspector.get_columns("files")}
-    if "is_deleted" not in column_names:
+    for table, columns in by_table.items():
+        existing = {c["name"] for c in inspector.get_columns(table)}
+        missing = [(col, ddl) for col, ddl in columns if col not in existing]
+        if not missing:
+            continue
         with engine.begin() as conn:
-            conn.execute(
-                text("ALTER TABLE files ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0")
-            )
+            for column, ddl in missing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
 
 
-def _migrate_projects_head_commit() -> None:
-    """Add head_commit_id column to projects if missing."""
+def _migrate_merge_notifications() -> None:
+    """One-time: fold the old download_notifications table into notifications.
+
+    Mention and download notifications used to live in two tables reconciled in
+    the API via negative ids; they are now one table. SQLite cannot drop a NOT
+    NULL constraint via ALTER, so the notifications table is rebuilt with a
+    nullable comment_id plus the new download columns, existing mention rows are
+    copied across, then download_notifications rows are folded in (comment_id
+    NULL) and that table is dropped. No-op on fresh or already-merged DBs.
+    """
     inspector = inspect(engine)
-    if "projects" not in inspector.get_table_names():
+    if "notifications" not in inspector.get_table_names():
         return
-    column_names = {column["name"] for column in inspector.get_columns("projects")}
-    if "head_commit_id" not in column_names:
-        with engine.begin() as conn:
-            conn.execute(
-                text("ALTER TABLE projects ADD COLUMN head_commit_id INTEGER")
-            )
+    if "message" in {c["name"] for c in inspector.get_columns("notifications")}:
+        return  # already merged
+    has_download = "download_notifications" in inspector.get_table_names()
+
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE notifications_new ("
+            "id INTEGER PRIMARY KEY,"
+            "user_id INTEGER REFERENCES users(id),"
+            "comment_id INTEGER REFERENCES comments(id),"
+            "project_id INTEGER REFERENCES projects(id),"
+            "file_id INTEGER REFERENCES files(id),"
+            "file_version_id INTEGER REFERENCES file_versions(id),"
+            "actor_id INTEGER REFERENCES users(id),"
+            "type VARCHAR(32) DEFAULT 'mention',"
+            "message VARCHAR(512),"
+            "is_read BOOLEAN NOT NULL DEFAULT 0,"
+            "created_at DATETIME,"
+            "CONSTRAINT uq_notification_user_comment_type UNIQUE (user_id, comment_id, type)"
+            ")"
+        ))
+        conn.execute(text(
+            "INSERT INTO notifications_new "
+            "(id, user_id, comment_id, type, is_read, created_at) "
+            "SELECT id, user_id, comment_id, type, is_read, created_at FROM notifications"
+        ))
+        conn.execute(text("DROP TABLE notifications"))
+        conn.execute(text("ALTER TABLE notifications_new RENAME TO notifications"))
+        conn.execute(text("CREATE INDEX ix_notifications_user_id ON notifications (user_id)"))
+        conn.execute(text("CREATE INDEX ix_notifications_comment_id ON notifications (comment_id)"))
+        if has_download:
+            conn.execute(text(
+                "INSERT INTO notifications "
+                "(user_id, comment_id, project_id, file_id, file_version_id, actor_id, type, message, is_read, created_at) "
+                "SELECT user_id, NULL, project_id, file_id, file_version_id, actor_id, type, message, is_read, created_at "
+                "FROM download_notifications"
+            ))
+            conn.execute(text("DROP TABLE download_notifications"))
 
 
 def init_db() -> None:
     from . import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
-    _migrate_users_table()
-    _migrate_file_versions_table()
-    _migrate_files_is_deleted()
-    _migrate_projects_head_commit()
+    _run_migrations()
+    _migrate_merge_notifications()
 
     # Backfill initial commits for pre-existing projects.
     from .commit_service import backfill_initial_commits

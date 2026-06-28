@@ -255,3 +255,38 @@ def test_comment_delete_and_notification_read_permissions_are_enforced(
     )
     assert remaining_comments.status_code == 200, remaining_comments.text
     assert remaining_comments.json() == []
+
+
+def test_downloads_create_unified_notifications_and_mark_read(client: TestClient) -> None:
+    alice_headers = _register_and_login(client, "alice", "alice@example.com")
+    project_id = _create_project(client, alice_headers, "Download Project")
+    file_payload = _upload_file(client, project_id, alice_headers, "gear.step", b"v1")
+
+    project_dl = client.get(f"/api/projects/{project_id}/download", headers=alice_headers)
+    assert project_dl.status_code == 200, project_dl.text
+
+    file_dl = client.get(
+        f"/api/projects/{project_id}/files/{file_payload['id']}/versions/{file_payload['current_version_id']}/download",
+        headers=alice_headers,
+    )
+    assert file_dl.status_code == 200, file_dl.text
+
+    notifications = client.get("/api/notifications", headers=alice_headers)
+    assert notifications.status_code == 200, notifications.text
+    items = notifications.json()
+    assert {item["type"] for item in items} == {"project_download", "file_download"}
+    # Unified table: every id is a real positive id (no negative-id disambiguation).
+    assert all(item["id"] > 0 for item in items)
+
+    file_note = next(item for item in items if item["type"] == "file_download")
+    assert file_note["comment_id"] is None
+    assert file_note["project_id"] == project_id
+    assert file_note["file_id"] == file_payload["id"]
+    assert file_note["comment_content"]  # carries the download message text
+    assert file_note["author_username"] == "alice"
+
+    mark_read = client.post(
+        f"/api/notifications/{file_note['id']}/read", headers=alice_headers
+    )
+    assert mark_read.status_code == 200, mark_read.text
+    assert mark_read.json()["is_read"] is True

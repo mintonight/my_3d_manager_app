@@ -154,6 +154,15 @@ class CommentMention(Base):
 
 
 class Notification(Base):
+    """Unified notification row.
+
+    Mention notifications (type='mention') reference a comment; download
+    notifications (type='project_download'/'file_download') leave comment_id
+    NULL and carry project/file/actor/message instead. The unique constraint
+    only dedupes mentions — SQLite treats NULL comment_id as distinct, so
+    download notifications never collide.
+    """
+
     __tablename__ = "notifications"
     __table_args__ = (
         UniqueConstraint(
@@ -166,26 +175,16 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id"), index=True)
-    type: Mapped[str] = mapped_column(String(32), default="mention")
-    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
-class DownloadNotification(Base):
-    __tablename__ = "download_notifications"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
-    file_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True, index=True)
-    file_version_id: Mapped[int | None] = mapped_column(
-        ForeignKey("file_versions.id"),
-        nullable=True,
-        index=True,
+    comment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("comments.id"), nullable=True, index=True
     )
-    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    type: Mapped[str] = mapped_column(String(32), default="project_download")
-    message: Mapped[str] = mapped_column(String(512))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    file_id: Mapped[int | None] = mapped_column(ForeignKey("files.id"), nullable=True)
+    file_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("file_versions.id"), nullable=True
+    )
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    type: Mapped[str] = mapped_column(String(32), default="mention")
+    message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
-from .models import DownloadNotification, File as FileModel
-from .models import FileVersion, Project, ProjectMember, User
+from .models import File as FileModel
+from .models import FileVersion, Notification, Project, ProjectMember, User
 
 
 def _download_recipient_ids(db: Session, project_id: int) -> set[int]:
@@ -23,7 +23,7 @@ def create_project_download_notifications(
     message = f'{actor.username} downloaded project archive "{project.name}"'
     for user_id in sorted(_download_recipient_ids(db, project.id)):
         db.add(
-            DownloadNotification(
+            Notification(
                 user_id=user_id,
                 project_id=project.id,
                 actor_id=actor.id,
@@ -47,7 +47,7 @@ def create_file_download_notifications(
     )
     for user_id in sorted(_download_recipient_ids(db, project.id)):
         db.add(
-            DownloadNotification(
+            Notification(
                 user_id=user_id,
                 project_id=project.id,
                 file_id=file.id,
