@@ -35,10 +35,49 @@ class Project(Base):
     description: Mapped[str] = mapped_column(String(512), default="")
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # HEAD pointer: which project commit is currently checked out.
+    head_commit_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_commits.id", use_alter=True, name="fk_project_head_commit"),
+        nullable=True,
+    )
 
     members: Mapped[list["ProjectMember"]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+    head_commit: Mapped["ProjectCommit | None"] = relationship(
+        foreign_keys=[head_commit_id]
+    )
+
+
+class ProjectCommit(Base):
+    """A project-level snapshot (= git commit). Immutable once created."""
+
+    __tablename__ = "project_commits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    message: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    files: Mapped[list["ProjectCommitFile"]] = relationship(
+        back_populates="commit", cascade="all, delete-orphan"
+    )
+
+
+class ProjectCommitFile(Base):
+    """One entry in a commit's tree: which file, at which version, at commit time."""
+
+    __tablename__ = "project_commit_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    commit_id: Mapped[int] = mapped_column(ForeignKey("project_commits.id"), index=True)
+    file_id: Mapped[int] = mapped_column(ForeignKey("files.id"), index=True)
+    file_version_id: Mapped[int] = mapped_column(
+        ForeignKey("file_versions.id"), index=True
+    )
+
+    commit: Mapped["ProjectCommit"] = relationship(back_populates="files")
 
 
 class ProjectMember(Base):
@@ -64,6 +103,8 @@ class File(Base):
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Soft delete: rollback to an older snapshot can restore the file.
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class FileVersion(Base):

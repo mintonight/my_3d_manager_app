@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .bootstrap import ensure_default_admin
 from .database import init_db
-from .routers import auth, comments, files, notifications, projects, search
+from .routers import auth, comments, files, notifications, projects, search, snapshots
 
 
 app = FastAPI(
@@ -39,3 +39,4 @@ app.include_router(files.router)
 app.include_router(search.router)
 app.include_router(comments.router)
 app.include_router(notifications.router)
+app.include_router(snapshots.router)

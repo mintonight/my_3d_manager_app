@@ -22,6 +22,7 @@ import { useAuth } from '../auth';
 import { useI18n } from '../i18n';
 import UploadFile from '../components/UploadFile';
 import MemberPanel from '../components/MemberPanel';
+import SnapshotPanel from '../components/SnapshotPanel';
 import PreviewModal from '../components/FilePreview/PreviewModal';
 import { isPreviewable } from '../components/FilePreview/utils';
 import CommentPanel from '../components/CommentPanel';
@@ -80,6 +81,7 @@ export default function ProjectDetail() {
         deletedProject: '项目已删除',
         filesTab: (count: number) => `文件 (${count})`,
         membersTab: '成员',
+        snapshotsTab: '快照',
         uploadNewFile: '上传新文件',
         uploadFolder: '上传文件夹',
         viewerInfo: '查看者只能浏览、搜索、评论和下载文件。',
@@ -116,6 +118,7 @@ export default function ProjectDetail() {
         deletedProject: 'Project deleted',
         filesTab: (count: number) => `Files (${count})`,
         membersTab: 'Members',
+        snapshotsTab: 'Snapshots',
         uploadNewFile: 'Upload New File',
         uploadFolder: 'Upload Folder',
         viewerInfo: 'Viewers can browse, search, comment on, and download files only.',
@@ -465,6 +468,13 @@ export default function ProjectDetail() {
               key: 'members',
               label: text.membersTab,
               children: <MemberPanel pid={pidNum} myRole={project.my_role} />,
+            },
+            {
+              key: 'snapshots',
+              label: text.snapshotsTab,
+              children: (
+                <SnapshotPanel pid={pidNum} canRollback={editable} onChanged={load} />
+              ),
             },
           ]}
         />

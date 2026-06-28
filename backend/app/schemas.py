@@ -155,3 +155,45 @@ class NotificationOut(BaseModel):
     comment_content: str
     author_username: str
     created_at: datetime
+
+
+# --- Project snapshots (git-style commits) ---
+
+
+class SnapshotFileOut(BaseModel):
+    """One entry in a snapshot's tree: a file at a specific version."""
+
+    file_id: int
+    file_name: str
+    file_version_id: int
+    version_no: int
+    size_bytes: int
+
+
+class SnapshotOut(BaseModel):
+    """A project-level snapshot (= git commit)."""
+
+    id: int
+    project_id: int
+    author_id: int
+    author_username: str
+    message: str
+    created_at: datetime
+    is_head: bool
+    file_count: int
+    files: list[SnapshotFileOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class SnapshotListItemOut(BaseModel):
+    """Compact commit entry for the timeline (without the full tree)."""
+
+    id: int
+    author_id: int
+    author_username: str
+    message: str
+    created_at: datetime
+    is_head: bool
+    file_count: int

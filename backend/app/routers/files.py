@@ -19,6 +19,7 @@ from ..preview import extract_solidworks_thumbnail, list_ole_streams
 from ..schemas import FileOut, FileVersionOut
 from ..storage import get_blob_path, save_blob
 from ..sw_converter import is_solidworks_file, convert_to_step
+from ..commit_service import create_commit
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ def list_files(
     p, _, _ = ctx
     files = (
         db.query(FileModel)
-        .filter(FileModel.project_id == p.id)
+        .filter(FileModel.project_id == p.id, FileModel.is_deleted.is_(False))
         .order_by(FileModel.created_at.desc())
         .all()
     )
@@ -158,21 +159,35 @@ async def upload_new_file(
 ) -> FileOut:
     p, user, _ = ctx
     name = _sanitize_rel_path(upload.filename or "unnamed")
+    content = await upload.read()
+    blob_hash = save_blob(content)
     existing = db.query(FileModel).filter_by(project_id=p.id, name=name).first()
-    if existing:
+
+    if existing and not existing.is_deleted:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"file '{name}' already exists; use commit endpoint to add a new version",
         )
-    content = await upload.read()
-    blob_hash = save_blob(content)
 
-    f = FileModel(project_id=p.id, name=name)
-    db.add(f)
-    db.flush()
+    if existing and existing.is_deleted:
+        # Re-uploading a previously deleted file: revive it with a new version.
+        f = existing
+        f.is_deleted = False
+        max_no = (
+            db.query(FileVersion.version_no)
+            .filter(FileVersion.file_id == f.id)
+            .order_by(FileVersion.version_no.desc())
+            .first()
+        )
+        next_no = (max_no[0] if max_no else 0) + 1
+    else:
+        f = FileModel(project_id=p.id, name=name)
+        db.add(f)
+        db.flush()
+        next_no = 1
     v = FileVersion(
         file_id=f.id,
-        version_no=1,
+        version_no=next_no,
         blob_hash=blob_hash,
         size_bytes=len(content),
         commit_message=commit_message or "initial upload",
@@ -183,6 +198,8 @@ async def upload_new_file(
     f.current_version_id = v.id
     db.commit()
     db.refresh(f)
+    create_commit(db, p, user, commit_message or f"上传文件 {name}")
+    db.commit()
     _maybe_schedule_step_conversion(background_tasks, f.id, v.id, blob_hash, name)
     return _file_out(f, db)
 
@@ -255,6 +272,8 @@ async def upload_folder(
             step_candidates.append((f.id, v.id, blob_hash, rel_path))
 
     db.commit()
+    create_commit(db, p, user, commit_message or f"上传文件夹（{len(uploads)} 个文件）")
+    db.commit()
     for fid, vid, bh, name in step_candidates:
         _maybe_schedule_step_conversion(background_tasks, fid, vid, bh, name)
     for f in results:
@@ -309,6 +328,8 @@ async def commit_new_version(
     f.current_version_id = v.id
     db.commit()
     db.refresh(v)
+    create_commit(db, p, user, commit_message or f"更新 {f.name}")
+    db.commit()
     _maybe_schedule_step_conversion(background_tasks, fid, v.id, new_hash, f.name)
     return FileVersionOut(
         id=v.id,
@@ -602,12 +623,13 @@ def delete_file(
     ctx: tuple[Project, User, str] = Depends(require_project_role("owner")),
     db: Session = Depends(get_db),
 ) -> None:
-    p, _, _ = ctx
+    p, user, _ = ctx
     f = db.get(FileModel, fid)
     if not f or f.project_id != p.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "file not found")
-    f.current_version_id = None
-    db.flush()
-    db.query(FileVersion).filter(FileVersion.file_id == fid).delete()
-    db.delete(f)
+    # Soft delete: keep the file and all its versions so that rolling back to
+    # an earlier project snapshot can restore it. Only mark it hidden.
+    f.is_deleted = True
+    db.commit()
+    create_commit(db, p, user, f"删除文件 {f.name}")
     db.commit()

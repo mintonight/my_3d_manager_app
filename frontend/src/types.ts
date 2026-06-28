@@ -104,3 +104,28 @@ export interface Notification {
   author_username: string;
   created_at: string;
 }
+
+// --- Project snapshots (git-style commits) ---
+
+export interface SnapshotFile {
+  file_id: number;
+  file_name: string;
+  file_version_id: number;
+  version_no: number;
+  size_bytes: number;
+}
+
+export interface SnapshotListItem {
+  id: number;
+  author_id: number;
+  author_username: string;
+  message: string;
+  created_at: string;
+  is_head: boolean;
+  file_count: number;
+}
+
+export interface Snapshot extends SnapshotListItem {
+  project_id: number;
+  files: SnapshotFile[];
+}

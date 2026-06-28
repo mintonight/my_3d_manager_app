@@ -503,6 +503,12 @@ def create_project(
     db.add(ProjectMember(project_id=p.id, user_id=user.id, role="owner"))
     db.commit()
     db.refresh(p)
+    # Create an initial (empty) snapshot so the project has a HEAD from the start.
+    from ..commit_service import create_commit
+
+    create_commit(db, p, user, "项目初始化")
+    db.commit()
+    db.refresh(p)
     return _project_out(p, "owner")
 
 
@@ -615,6 +621,22 @@ def delete_project(
     db.query(ProjectMember).filter(ProjectMember.project_id == pid).delete(
         synchronize_session=False
     )
+
+    # Delete all project snapshots (commits + their trees) and clear HEAD.
+    from ..models import ProjectCommit, ProjectCommitFile
+
+    commit_ids = [
+        row[0]
+        for row in db.query(ProjectCommit.id).filter(ProjectCommit.project_id == pid).all()
+    ]
+    if commit_ids:
+        db.query(ProjectCommitFile).filter(
+            ProjectCommitFile.commit_id.in_(commit_ids)
+        ).delete(synchronize_session=False)
+        db.query(ProjectCommit).filter(ProjectCommit.id.in_(commit_ids)).delete(
+            synchronize_session=False
+        )
+    p.head_commit_id = None
 
     db.delete(p)
     db.commit()
